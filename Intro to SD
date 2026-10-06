@@ -1,0 +1,3062 @@
+# System Design Foundations
+
+> Complete revision notes for Section 1: Introduction to System Design
+
+---
+
+## Table of Contents
+
+1. #1-section-purpose
+2. #2-why-system-design-matters
+3. #3-coding-vs-system-design
+4. #4-developer-thinking-vs-architect-thinking
+5. #5-architect-mindset
+6. #6-functional-requirements
+7. #7-non-functional-requirements
+8. #8-requirements-gathering-checklist
+9. #9-back-of-the-envelope-estimation
+10. #10-four-step-design-framework
+11. #11-architectural-trade-offs
+12. #12-bottlenecks-and-failure-points
+13. #13-scalability-thinking
+14. #14-cost-awareness
+15. #15-patterns-and-anti-patterns
+16. #16-design-decision-framework
+17. #17-design-review-checklist
+18. #18-real-world-product-mapping
+19. #19-mini-case-study-1-social-posting-platform
+20. #20-mini-case-study-2-photo-sharing-service
+21. #21-interview-preparation
+22. #22-common-mistakes
+23. #23-myth-vs-reality
+24. #24-glossary
+25. #25-faqs
+26. #26-self-test
+27. #27-one-page-revision-sheet
+28. #28-top-10-points
+
+---
+
+# 1. Section Purpose
+
+This section builds the foundation for architectural thinking.
+
+Most developers initially think in terms of:
+
+- Code
+- Classes
+- Functions
+- APIs
+- Features
+- Implementation details
+
+System design requires us to move beyond individual features and think about the behavior of the complete system.
+
+By the end of this section, we should understand:
+
+- Why system design matters
+- How coding and system design differ
+- How architects think
+- How to gather requirements correctly
+- How to identify functional requirements
+- How to identify non-functional requirements
+- How to perform rough capacity estimation
+- How to identify trade-offs
+- How to think about scale and failures
+- How to approach any design problem using a repeatable framework
+
+## Core idea
+
+A working feature is not automatically a scalable, reliable, secure, maintainable, or affordable system.
+
+```text
+Good system design begins before drawing architecture boxes.
+
+It begins with:
+1. Clear requirements
+2. Scale assumptions
+3. Quantitative thinking
+4. Constraints
+5. Trade-offs
+6. Failure awareness
+```
+
+---
+
+# 2. Why System Design Matters
+
+A system can contain correct code and still fail in production.
+
+A feature that works for 100 users may fail badly for 1 million users.
+
+This can happen because of:
+
+- Database bottlenecks
+- High latency
+- Traffic spikes
+- Insufficient server capacity
+- Excessive data growth
+- Poor caching
+- Network failures
+- Slow downstream services
+- Lack of redundancy
+- Incorrect consistency decisions
+- High infrastructure cost
+- Difficult maintenance
+- Weak monitoring
+- Poor failure recovery
+
+## Coding builds a feature
+
+Coding usually answers questions such as:
+
+- Which class should I create?
+- Which algorithm should I use?
+- How should this endpoint be implemented?
+- How should the data be validated?
+- How should I test this function?
+- How should I handle an exception?
+
+## System design protects the feature under pressure
+
+System design answers questions such as:
+
+- What exactly should we build?
+- Why should the system be structured this way?
+- What happens when traffic grows 10 times?
+- What happens when data grows 100 times?
+- What happens if the database fails?
+- What happens if a dependency becomes slow?
+- What consistency level is required?
+- How should the system recover from failure?
+- How expensive will the system become?
+- How will multiple teams maintain it?
+- How can the system evolve in the future?
+
+## Career importance
+
+System design is important for:
+
+- Backend engineering roles
+- Senior software engineering roles
+- Technical leadership roles
+- Architecture discussions
+- System design interviews
+- Distributed systems roles
+- Production engineering
+- Cloud engineering
+- Making long-term technical decisions
+
+Modern tools can help generate code, but architectural decisions still require judgment about:
+
+- Business requirements
+- Component boundaries
+- Data models
+- Storage choices
+- Consistency
+- Availability
+- Reliability
+- Security
+- Performance
+- Failure handling
+- Cost
+
+---
+
+# 3. Coding vs System Design
+
+| Coding | System Design |
+|---|---|
+| Focuses on implementation | Focuses on structure and behavior |
+| Usually local in scope | Covers the complete system |
+| Solves immediate feature behavior | Solves scale, reliability, cost, and evolution |
+| Deals with functions, classes, and algorithms | Deals with components, contracts, and data flow |
+| Judged by correctness and code quality | Judged by architectural fit and reasoning |
+| Often focuses on the happy path | Must include failures and edge cases |
+| Produces implementation | Produces architectural decisions |
+
+## Example: Photo upload
+
+A coding-focused view asks:
+
+- How do I receive the file?
+- How do I validate the file type?
+- How do I save the image?
+- How do I return the image URL?
+
+A system-design view also asks:
+
+- Where should images be stored?
+- Should they be stored in a database or object storage?
+- How much storage will be required each day?
+- Should the client upload directly to object storage?
+- How will images be resized?
+- Should image processing be synchronous or asynchronous?
+- How will images be delivered to users?
+- Is a CDN required?
+- What happens if image processing fails?
+- What happens when the same request is retried?
+- What data must never be lost?
+- How will deleted images be handled?
+- How much will storage and bandwidth cost?
+
+Both coding and system design are important, but they solve different levels of the problem.
+
+---
+
+# 4. Developer Thinking vs Architect Thinking
+
+## Developer thinking
+
+A developer commonly asks:
+
+- How do I implement this feature?
+- Which class should I create?
+- Which API should I expose?
+- Which data structure should I use?
+- How do I make this code readable?
+- Does the feature work correctly?
+
+## Architect thinking
+
+An architect also asks:
+
+- What happens under heavy load?
+- What happens when a dependency fails?
+- What are the most important business requirements?
+- Which guarantees does the system need?
+- What trade-offs are acceptable?
+- How expensive will this become?
+- How will the system evolve?
+- Can different components scale independently?
+- Can multiple teams work on this safely?
+- What will happen after one year of data growth?
+- How will the system be monitored?
+- How will it recover from failure?
+
+## The main difference
+
+```text
+Developer thinking:
+How do I build this feature?
+
+Architect thinking:
+What system structure fits this problem,
+and how will that system behave under
+scale, failure, change, and business pressure?
+```
+
+---
+
+# 5. Architect Mindset
+
+Architectural thinking is not simply more coding experience. It is a different way of looking at problems.
+
+## 5.1 Think in trade-offs, not perfection
+
+There is usually no perfect architecture.
+
+Improving one quality can weaken another quality.
+
+Examples:
+
+- Stronger consistency can reduce availability
+- More redundancy improves resilience but increases cost
+- More security checks can add latency
+- More flexibility can add complexity
+- Faster launch can create technical debt
+- Better durability requires additional storage copies
+- Lower latency can require stale cached data
+
+The architect’s responsibility is not to remove every trade-off.
+
+The architect’s responsibility is to select the trade-off that best fits the business context.
+
+---
+
+## 5.2 Think about failure, not only success
+
+Do not design only for the happy path.
+
+Ask:
+
+- What if the database is unavailable?
+- What if the cache fails?
+- What if the network becomes slow?
+- What if an external API times out?
+- What if the same message is delivered twice?
+- What if payment succeeds but order creation fails?
+- What if a server crashes during processing?
+- What if traffic suddenly increases 10 times?
+- What if a region becomes unavailable?
+- What if a deployment introduces a bug?
+
+A production-ready design explains how the system detects, handles, and recovers from failure.
+
+---
+
+## 5.3 Think in components and contracts
+
+Before thinking about classes and functions, identify:
+
+- Major components
+- Component responsibilities
+- Inputs and outputs
+- APIs
+- Events
+- Data ownership
+- Communication boundaries
+- Failure boundaries
+- Scaling boundaries
+
+A component should have a clear responsibility.
+
+For example:
+
+```text
+User Service
+Responsibility: User profile and identity information
+
+Post Service
+Responsibility: Creating and retrieving posts
+
+Feed Service
+Responsibility: Generating user timelines
+
+Notification Service
+Responsibility: Delivering notifications
+```
+
+---
+
+## 5.4 Think about cost
+
+A technically impressive design can still be a bad design if it is too expensive.
+
+Cost includes:
+
+- Compute cost
+- Database cost
+- Storage cost
+- Network cost
+- CDN cost
+- Logging cost
+- Monitoring cost
+- Cross-region replication cost
+- Engineering cost
+- On-call burden
+- Operational complexity
+- Migration cost
+
+The important question is:
+
+```text
+Is this technical improvement worth its actual business cost?
+```
+
+---
+
+## 5.5 Think about lifecycle and evolution
+
+A system is not finished after launch.
+
+Consider:
+
+- Launch requirements
+- Expected growth
+- Data growth
+- New product features
+- Schema evolution
+- Team growth
+- Component ownership
+- Operational burden
+- Migration difficulty
+- Future regions
+- Future compliance requirements
+
+A good design should meet today’s needs while leaving a reasonable path for tomorrow.
+
+That does not mean building every future feature now.
+
+---
+
+## 5.6 Think in patterns and anti-patterns
+
+Useful patterns include:
+
+- Caching
+- Redundancy
+- Loose coupling
+- Component separation
+- Asynchronous processing
+- Load balancing
+- Replication
+- Graceful degradation
+
+Common anti-patterns include:
+
+- Single point of failure
+- Tight coupling
+- Technology-first design
+- Happy-path-only design
+- Premature microservices
+- Premature optimization
+- Launch-only thinking
+- Ignoring observability
+
+---
+
+## Architect mental model
+
+When a system design problem is presented, ask:
+
+1. What exactly are we building?
+2. Who will use it?
+3. What must it do?
+4. What is out of scope?
+5. What matters most?
+6. What scale must it handle?
+7. What data cannot be lost?
+8. Which failure would be unacceptable?
+9. What are the cost constraints?
+10. How might the system evolve?
+
+Then think in this order:
+
+```text
+Requirements
+    ↓
+Scope
+    ↓
+Scale assumptions
+    ↓
+Major components
+    ↓
+Critical workflows
+    ↓
+Data model
+    ↓
+Bottlenecks
+    ↓
+Trade-offs
+    ↓
+Failure handling
+    ↓
+Cost and evolution
+```
+
+---
+
+# 6. Functional Requirements
+
+Functional requirements describe **what the system must do**.
+
+They represent capabilities visible to users, administrators, or other systems.
+
+## Chat application examples
+
+- A user can send a text message
+- A user can receive a message
+- A user can create a group chat
+- A user can view delivery status
+- A user can search previous messages
+- A user can block another user
+
+## E-commerce examples
+
+- A user can search for products
+- A user can add a product to a cart
+- A user can place an order
+- A user can make a payment
+- A user can cancel an eligible order
+- An administrator can update product inventory
+
+## Vague statement vs actual requirement
+
+```text
+Vague:
+Build a chat application.
+
+Specific:
+A registered user can send and receive
+one-to-one text messages.
+```
+
+## Strong functional requirements are
+
+- Specific
+- Testable
+- Clear
+- Properly scoped
+- Prioritized
+- Connected to a user or system action
+
+## User story format
+
+```text
+As a <user type>,
+I want to ,
+so that <business value>.
+```
+
+Example:
+
+```text
+As a registered user,
+I want to follow another user,
+so that I can see that user's posts in my timeline.
+```
+
+## Hidden functional requirements
+
+The obvious feature is rarely the complete requirement.
+
+Clarify:
+
+- Can the item be edited?
+- Can the item be deleted?
+- Is deletion permanent or reversible?
+- Can the action be canceled?
+- Can failed operations be retried?
+- Can users block one another?
+- Does content expire?
+- Are duplicate requests possible?
+- What happens after payment failure?
+- What happens after partial success?
+- Are privacy settings required?
+- Are administrator actions required?
+- What happens when ownership changes?
+
+## MVP prioritization
+
+Separate requirements into:
+
+### Must-have
+
+Required for the first usable version.
+
+### Nice-to-have
+
+Useful but not essential for launch.
+
+### Future feature
+
+May be added after product validation or growth.
+
+### Out of scope
+
+Explicitly excluded from the current design.
+
+This prevents over-engineering and keeps the design aligned with business needs.
+
+---
+
+# 7. Non-Functional Requirements
+
+Non-functional requirements describe **how well the system must behave**.
+
+A system can implement all features correctly and still fail because it is:
+
+- Too slow
+- Too fragile
+- Too expensive
+- Too insecure
+- Difficult to scale
+- Difficult to maintain
+- Difficult to monitor
+- Unable to recover
+
+## 7.1 Performance
+
+Performance requirements include:
+
+- Response latency
+- Processing time
+- Upload time
+- Download time
+- Search response time
+
+Example:
+
+```text
+99% of read requests should complete within 200 ms.
+```
+
+---
+
+## 7.2 Throughput
+
+Throughput represents the amount of work handled per unit of time.
+
+Examples:
+
+- Requests per second
+- Queries per second
+- Messages per second
+- Transactions per second
+- Events per second
+
+Example:
+
+```text
+The system should support 20,000 requests per second at peak.
+```
+
+---
+
+## 7.3 Concurrency
+
+Concurrency represents simultaneous activity.
+
+Examples:
+
+- Concurrent users
+- Concurrent connections
+- Concurrent uploads
+- Concurrent video streams
+- Concurrent database transactions
+
+---
+
+## 7.4 Scalability
+
+Scalability is the ability to handle increasing load.
+
+The load may increase through:
+
+- More users
+- More requests
+- More data
+- More connections
+- More regions
+- More features
+
+---
+
+## 7.5 Availability
+
+Availability represents how often the system remains operational and accessible.
+
+Examples:
+
+```text
+99.9% monthly availability
+99.99% monthly availability
+```
+
+Higher availability normally requires:
+
+- More redundancy
+- Better failover
+- More monitoring
+- More operational investment
+- More cost
+
+---
+
+## 7.6 Reliability
+
+Reliability represents the ability of the system to continue producing correct results, including when failures occur.
+
+Reliability includes:
+
+- Correct processing
+- Data preservation
+- Safe retries
+- Duplicate handling
+- Recovery
+- Failure isolation
+
+## Availability vs reliability
+
+```text
+Availability:
+Can users access the system?
+
+Reliability:
+Does the system behave correctly and preserve data?
+```
+
+A service may be reachable but return incorrect results. In that case, it is available but not reliable.
+
+---
+
+## 7.7 Security
+
+Security requirements can include:
+
+- Authentication
+- Authorization
+- Encryption in transit
+- Encryption at rest
+- Audit logs
+- Rate limiting
+- Abuse protection
+- Data privacy
+- Secret management
+
+---
+
+## 7.8 Maintainability
+
+Maintainability includes:
+
+- Ease of changing the system
+- Ease of debugging
+- Clear component ownership
+- Code testability
+- Deployment safety
+- Documentation
+- Modular boundaries
+
+---
+
+## 7.9 Operational readiness
+
+Operational requirements include:
+
+- Logging
+- Monitoring
+- Alerting
+- Distributed tracing
+- Backups
+- Disaster recovery
+- Deployment automation
+- Rollback support
+- Health checks
+
+---
+
+## 7.10 Cost
+
+Cost requirements can include:
+
+- Infrastructure budget
+- Storage budget
+- Network budget
+- Managed service cost
+- Operational cost
+- Engineering cost
+
+---
+
+## NFRs must be measurable
+
+```text
+Weak:
+The API should be fast.
+
+Strong:
+99% of read requests should complete within 200 ms.
+```
+
+```text
+Weak:
+The system should be highly available.
+
+Strong:
+The service should provide 99.99% monthly availability.
+```
+
+```text
+Weak:
+The system should scale well.
+
+Strong:
+The system should support 100,000 concurrent users
+and 50,000 requests per second at peak.
+```
+
+## Functional vs non-functional requirements
+
+| Functional requirement | Non-functional requirement |
+|---|---|
+| A user can send a message | 99% of messages are delivered within the required latency |
+| A user can upload a photo | The system supports the expected upload throughput |
+| A user can search products | 99% of searches complete within the target latency |
+| A user can create an order | Order data is preserved despite expected failures |
+| A user can view a feed | The feed supports the expected peak read traffic |
+
+---
+
+# 8. Requirements Gathering Checklist
+
+Before designing, ask the following questions.
+
+## Users
+
+- Who are the users?
+- Are there multiple user types?
+- What can each user type do?
+- Are administrators required?
+- Are external systems involved?
+
+## Core workflows
+
+- What are the most important user actions?
+- Which workflows generate the most traffic?
+- Which workflows are business-critical?
+- Which operations can be asynchronous?
+
+## Scope
+
+- What is the MVP?
+- What must be available at launch?
+- What can be delayed?
+- What is explicitly out of scope?
+
+## Hidden flows
+
+- Can data be edited?
+- Can data be deleted?
+- Is deletion reversible?
+- Can actions be retried?
+- Can actions be canceled?
+- Does data expire?
+- Can users block one another?
+- What happens after partial failure?
+- What happens after duplicate requests?
+
+## Scale
+
+- How many total users?
+- How many daily active users?
+- How many monthly active users?
+- How many actions per user?
+- What are the average and peak traffic levels?
+- What is the read/write ratio?
+- Is the audience regional or global?
+- What growth is expected?
+
+## Performance
+
+- What latency is acceptable?
+- What throughput is required?
+- How many concurrent users are expected?
+- Are real-time updates required?
+
+## Reliability
+
+- What data cannot be lost?
+- What operations can be retried?
+- Are duplicates acceptable?
+- What consistency is required?
+- What recovery expectations exist?
+
+## Security and compliance
+
+- Is authentication required?
+- Are different authorization levels required?
+- Must data be encrypted?
+- Are audit logs required?
+- Are there regulatory requirements?
+- Are there privacy restrictions?
+
+## Cost and constraints
+
+- What is the infrastructure budget?
+- Are there existing technology constraints?
+- What expertise does the team have?
+- Is a managed service acceptable?
+- Does the system need to evolve significantly?
+
+---
+
+# 9. Back-of-the-Envelope Estimation
+
+Back-of-the-envelope estimation uses simple assumptions and rough calculations to understand scale.
+
+The goal is not perfect math.
+
+The goal is:
+
+- Fast reasoning
+- Clear assumptions
+- Correct order of magnitude
+- Better architectural decisions
+
+## Why estimate before designing?
+
+Estimation helps answer:
+
+- Is one database enough?
+- Is object storage required?
+- Will storage dominate cost?
+- Will bandwidth dominate cost?
+- Is caching important?
+- How many servers may be needed?
+- What becomes the first bottleneck?
+- Is horizontal scaling needed?
+- Is a CDN useful?
+
+---
+
+## 9.1 Units to remember
+
+| Unit | Approximation |
+|---|---:|
+| 1 KB | 10³ bytes |
+| 1 MB | 10⁶ bytes |
+| 1 GB | 10⁹ bytes |
+| 1 TB | 10¹² bytes |
+| 1 PB | 10¹⁵ bytes |
+
+## Network conversion
+
+```text
+1 byte = 8 bits
+1 MB/s = 8 Mb/s
+```
+
+Bandwidth is usually expressed in bits per second.
+
+---
+
+## 9.2 Rough content-size assumptions
+
+These are estimation assumptions, not fixed rules.
+
+- One simple character is approximately 1 byte
+- A short text post may be a few hundred bytes
+- A smartphone photo may be approximately 4 MB
+- One minute of HD video may be approximately 50 MB
+- One minute of 4K video may be approximately 300 MB
+
+Actual sizes depend on:
+
+- Encoding
+- Compression
+- Resolution
+- Metadata
+- File format
+- Product restrictions
+
+Always state your assumptions.
+
+---
+
+## 9.3 QPS estimation
+
+QPS means queries or requests per second.
+
+```text
+Daily requests =
+Daily active users × Requests per user per day
+
+Average QPS =
+Daily requests / 86,400
+
+Peak QPS =
+Average QPS × Peak factor
+```
+
+For quick calculations:
+
+```text
+One day ≈ 100,000 seconds
+```
+
+### Example
+
+Assume:
+
+```text
+DAU = 10,000,000
+Requests per active user per day = 20
+```
+
+Then:
+
+```text
+Daily requests
+= 10,000,000 × 20
+= 200,000,000
+```
+
+Average QPS:
+
+```text
+Average QPS
+≈ 200,000,000 / 100,000
+≈ 2,000 QPS
+```
+
+If peak traffic is 3 times average:
+
+```text
+Peak QPS
+≈ 2,000 × 3
+≈ 6,000 QPS
+```
+
+---
+
+## 9.4 Read and write QPS
+
+If the read/write ratio is 9:1:
+
+```text
+Total QPS = 10,000
+
+Read QPS = 9,000
+Write QPS = 1,000
+```
+
+Read/write ratio influences:
+
+- Cache strategy
+- Database design
+- Read replicas
+- Data denormalization
+- Feed generation
+- Index strategy
+
+---
+
+## 9.5 Storage estimation
+
+```text
+Daily storage =
+Items created per day × Average item size
+
+Annual storage =
+Daily storage × 365
+
+Real storage =
+Raw storage × Replication factor
+```
+
+### Example
+
+Assume:
+
+```text
+Photos uploaded per day = 1,000,000
+Average photo size = 4 MB
+```
+
+Daily storage:
+
+```text
+1,000,000 × 4 MB
+= 4,000,000 MB
+= 4 TB per day
+```
+
+Annual raw storage:
+
+```text
+4 TB × 365
+≈ 1.46 PB per year
+```
+
+Additional storage may be needed for:
+
+- Replicas
+- Backups
+- Thumbnails
+- Multiple image sizes
+- Metadata
+- Database indexes
+- Logs
+
+---
+
+## 9.6 Bandwidth estimation
+
+```text
+Bandwidth in bits per second =
+Bytes transferred per second × 8
+```
+
+Estimate upload and download bandwidth separately.
+
+In media-heavy systems, downloads can be much higher than uploads because one uploaded item may be viewed many times.
+
+### Example
+
+If 100 photos of 4 MB are downloaded per second:
+
+```text
+Data per second
+= 100 × 4 MB
+= 400 MB/s
+```
+
+Convert to bits:
+
+```text
+400 MB/s × 8
+= 3,200 Mb/s
+= 3.2 Gb/s
+```
+
+---
+
+## 9.7 Concurrency estimation
+
+A rough model is:
+
+```text
+Concurrent users =
+Users starting a session per second × Average session duration
+```
+
+For long-lived connections such as chat or streaming, estimate simultaneous active connections, not only requests per second.
+
+---
+
+## 9.8 Server estimation
+
+```text
+Base server count =
+Peak QPS / Safe QPS per server
+```
+
+### Example
+
+```text
+Peak QPS = 20,000
+Safe capacity per server = 1,000 QPS
+```
+
+```text
+Base server count
+= 20,000 / 1,000
+= 20 servers
+```
+
+But 20 should not automatically be the final answer.
+
+Also include:
+
+- Target utilization
+- Redundancy
+- Failover capacity
+- Maintenance
+- Regional distribution
+- Unexpected traffic
+- Future growth
+
+Do not plan to run every server at 100% utilization.
+
+---
+
+## 9.9 Caching effect
+
+Suppose the system receives:
+
+```text
+Read QPS = 10,000
+Cache hit rate = 90%
+```
+
+Database load becomes:
+
+```text
+Database read QPS
+= 10,000 × 10%
+= 1,000 QPS
+```
+
+Caching can reduce:
+
+- Database load
+- Origin traffic
+- Response latency
+- Server count
+- Infrastructure cost
+
+Caching also introduces:
+
+- Stale data
+- Cache invalidation
+- Memory cost
+- Cache failure scenarios
+- Cache warming requirements
+
+---
+
+## 9.10 Peak traffic
+
+Average traffic is not enough.
+
+Rules of thumb:
+
+- Normal peak traffic may be 2 to 3 times average
+- Special events may create 5 to 10 times spikes
+- The correct factor depends on the product
+
+Always estimate:
+
+- Average traffic
+- Peak traffic
+- Unexpected spikes
+- Required headroom
+
+---
+
+## Estimation checklist
+
+Estimate:
+
+- DAU and MAU
+- Actions per user
+- Daily requests
+- Average QPS
+- Peak QPS
+- Read/write ratio
+- Data created daily
+- Data retained annually
+- Replication overhead
+- Upload bandwidth
+- Download bandwidth
+- Concurrent connections
+- Server capacity
+- Cache hit rate
+- Regional traffic
+- Cost implications
+
+## Estimation principles
+
+- Use powers of 10 for speed
+- State assumptions clearly
+- Focus on order of magnitude
+- Include peak traffic
+- Include replication
+- Include redundancy
+- Leave capacity headroom
+- Separate reads and writes
+- Remember that media often dominates storage and bandwidth
+
+---
+
+# 10. Four-Step Design Framework
+
+Use this framework for every system design problem.
+
+```text
+1. Gather requirements
+2. Create a high-level design
+3. Dive into detailed design
+4. Scale and optimize
+```
+
+---
+
+## Step 1: Gather requirements
+
+Clarify:
+
+- Functional requirements
+- Non-functional requirements
+- User types
+- MVP
+- Scope
+- Scale assumptions
+- Constraints
+- Hidden workflows
+- Security needs
+- Compliance needs
+
+Do not start by naming technologies.
+
+---
+
+## Step 2: Create a high-level design
+
+Identify the main components and data flow.
+
+Possible components:
+
+- Client
+- DNS
+- Load balancer
+- API gateway
+- Application servers
+- Database
+- Cache
+- Message broker
+- Object storage
+- CDN
+- Search engine
+- Monitoring system
+
+Stay broad at this stage.
+
+Example:
+
+```text
+Client
+  ↓
+Load Balancer
+  ↓
+Application Servers
+  ├── Cache
+  ├── Database
+  ├── Message Queue
+  └── Object Storage
+```
+
+The high-level design should show:
+
+- Main request path
+- Major components
+- Basic responsibilities
+- Basic communication flow
+
+---
+
+## Step 3: Dive into detailed design
+
+Focus on critical areas:
+
+- API design
+- Data schema
+- Read path
+- Write path
+- Storage model
+- Partitioning
+- Indexes
+- Consistency
+- Idempotency
+- Retry handling
+- Critical workflows
+- Component contracts
+- Failure handling
+- Trade-offs
+
+Do not explain every component at equal depth.
+
+Go deeper into the components that are most important for the requirements.
+
+---
+
+## Step 4: Scale and optimize
+
+Discuss:
+
+- Bottlenecks
+- Caching
+- Replication
+- Sharding
+- Partitioning
+- Load balancing
+- Asynchronous processing
+- Failover
+- Rate limiting
+- Monitoring
+- Alerting
+- Regional distribution
+- Cost optimization
+- Migration strategy
+- Future evolution
+
+---
+
+## Interview time guidance
+
+A possible time split is:
+
+- Requirements: 5 to 10 minutes
+- High-level design: 10 to 15 minutes
+- Detailed design: 15 to 20 minutes
+- Scaling and optimization: 10 to 15 minutes
+
+The exact timing depends on the discussion.
+
+The purpose of the framework is to prevent random, unstructured explanation.
+
+---
+
+# 11. Architectural Trade-offs
+
+Trade-offs are normal.
+
+A trade-off does not automatically mean the architecture is bad.
+
+## 11.1 Consistency vs availability
+
+Strong consistency may be important for:
+
+- Payments
+- Bank balances
+- Inventory reservation
+- Order state
+
+Temporary staleness may be acceptable for:
+
+- Social feeds
+- View counts
+- Recommendations
+- Analytics
+
+The decision depends on the business consequences of stale or conflicting data.
+
+---
+
+## 11.2 Performance vs security
+
+Additional security checks may add processing time.
+
+Examples:
+
+- Authorization checks
+- Encryption
+- Input validation
+- Fraud detection
+- Audit logging
+
+The answer is not to remove necessary security.
+
+The goal is to satisfy required protection while meeting realistic performance targets.
+
+---
+
+## 11.3 Simplicity vs future flexibility
+
+A simple design:
+
+- Is easier to build
+- Is easier to understand
+- Is easier to operate
+- Supports faster launch
+
+A highly flexible design:
+
+- May support more future scenarios
+- May reduce future rework
+- Introduces more present complexity
+
+Avoid solving imaginary future problems without evidence.
+
+---
+
+## 11.4 Cost vs redundancy
+
+Redundancy improves resilience through:
+
+- Multiple instances
+- Database replicas
+- Multiple availability zones
+- Multiple regions
+- Backup copies
+
+However, redundancy increases:
+
+- Infrastructure cost
+- Data transfer cost
+- Operational complexity
+
+Business criticality determines whether the extra cost is justified.
+
+---
+
+## 11.5 Fast launch vs maintainability
+
+Shortcuts may help launch version one quickly.
+
+However, too many shortcuts can create:
+
+- Technical debt
+- Deployment risk
+- Difficult debugging
+- Painful migrations
+- Slow future development
+
+The team should consciously decide which technical debt is acceptable.
+
+---
+
+## 11.6 Latency vs consistency
+
+Cached or replicated data can reduce latency.
+
+However, the returned data may be temporarily stale.
+
+The acceptable choice depends on the feature.
+
+---
+
+## 11.7 Build vs buy
+
+Building internally provides:
+
+- Control
+- Customization
+- Less direct vendor dependency
+
+Using a managed service can provide:
+
+- Faster delivery
+- Reduced operational burden
+- Built-in scaling
+- Built-in reliability features
+
+Consider:
+
+- Cost
+- Lock-in
+- Team expertise
+- Time to market
+- Product differentiation
+- Operational burden
+
+---
+
+## Trade-off communication template
+
+```text
+We are choosing <Option A> over <Option B>
+because <Requirement or constraint> matters more.
+
+The disadvantage is <Cost or limitation>.
+
+We will reduce that risk using <Mitigation>.
+```
+
+---
+
+# 12. Bottlenecks and Failure Points
+
+## Common early bottlenecks
+
+- One database serving everything
+- Missing database indexes
+- No caching in a read-heavy system
+- Synchronous communication between all components
+- Insufficient server capacity
+- Underestimated media storage
+- Underestimated network bandwidth
+- Hot database partitions
+- Slow downstream APIs
+- Unbounded queues
+- Excessive logging
+- No traffic-spike planning
+- No redundancy
+- Unclear assumptions
+
+## Typical failure points
+
+- Database outage
+- Cache outage
+- Message broker outage
+- External payment-provider outage
+- Network partition
+- Slow downstream service
+- Traffic spike
+- Duplicate event delivery
+- Partial transaction failure
+- Server crash during processing
+- Bad deployment
+- Incorrect schema decision
+- Expensive data growth
+
+## Questions for each critical component
+
+Ask:
+
+- What if this component becomes slow?
+- What if this component becomes unavailable?
+- Is it a single point of failure?
+- Can requests be retried safely?
+- Can duplicate requests occur?
+- Can the system degrade gracefully?
+- Is data preserved?
+- How is failure detected?
+- How is the component recovered?
+- What happens to work already in progress?
+- Is a timeout configured?
+- Is a fallback available?
+
+## Single point of failure
+
+A single point of failure is a component whose failure can stop the complete system or a critical workflow.
+
+Potential mitigations include:
+
+- Multiple instances
+- Replication
+- Automatic failover
+- Load balancing
+- Durable queues
+- Backups
+- Graceful degradation
+
+Every mitigation adds cost and complexity, so it should be based on actual requirements.
+
+---
+
+# 13. Scalability Thinking
+
+Scalability is the ability of the system to handle increasing load.
+
+The load may grow through:
+
+- More users
+- More traffic
+- More data
+- More connections
+- More regions
+- More features
+
+## Questions to ask
+
+- What happens when users grow 10 times?
+- What happens when data grows 100 times?
+- Do reads dominate writes?
+- Do writes dominate reads?
+- Does media dominate storage?
+- Does media dominate bandwidth?
+- Can components scale independently?
+- Can the database scale?
+- Can the system scale horizontally?
+- Which resource becomes the bottleneck first?
+
+---
+
+## Vertical scaling
+
+Vertical scaling means increasing the capacity of one machine.
+
+Examples:
+
+- More CPU
+- More memory
+- Faster disk
+- Larger machine
+
+### Advantages
+
+- Simple
+- Easier to operate initially
+- Useful for early-stage systems
+
+### Limitations
+
+- Hardware ceiling
+- Larger failure impact
+- Can become expensive
+- May require downtime
+
+---
+
+## Horizontal scaling
+
+Horizontal scaling means adding more machines or instances.
+
+### Advantages
+
+- Better growth potential
+- Can improve redundancy
+- Allows independent component scaling
+
+### Challenges
+
+- Load distribution
+- Distributed coordination
+- Data partitioning
+- Network failures
+- Distributed transactions
+- Operational complexity
+
+## Important principle
+
+High scale does not automatically mean microservices.
+
+Start with the simplest architecture that satisfies current requirements and gives a reasonable evolution path.
+
+---
+
+# 14. Cost Awareness
+
+Architects must think about cost together with performance and reliability.
+
+## Cost drivers
+
+- Compute
+- Databases
+- Storage
+- Replicas
+- Backups
+- Network egress
+- CDN usage
+- Logs
+- Metrics
+- Managed services
+- Cross-region replication
+- Engineering effort
+- On-call burden
+
+## Examples
+
+- Storing all logs in expensive hot storage forever may be wasteful
+- Moving old data to cheaper storage can reduce cost
+- Redundancy improves availability but increases infrastructure cost
+- Caching can reduce database and server cost
+- A CDN can reduce origin traffic
+- Over-engineering can create cost without business value
+
+## Cost is not only infrastructure
+
+Also consider:
+
+- Developer productivity
+- Deployment complexity
+- Incident frequency
+- Debugging difficulty
+- Vendor lock-in
+- Migration effort
+- Time to market
+- Maintenance burden
+
+## Key question
+
+```text
+Is this design improvement worth its actual business cost?
+```
+
+---
+
+# 15. Patterns and Anti-Patterns
+
+## Useful patterns
+
+### Redundancy
+
+Maintain multiple instances or copies for critical components.
+
+### Loose coupling
+
+Components communicate through clear contracts and avoid depending on internal implementation details.
+
+### Component separation
+
+Separate responsibilities so that components can change and scale independently.
+
+### Caching
+
+Store frequently requested data closer to consumers to reduce repeated work.
+
+### Asynchronous processing
+
+Move non-immediate work outside the synchronous request path.
+
+Examples:
+
+- Sending emails
+- Generating thumbnails
+- Processing analytics
+- Delivering notifications
+
+### Load balancing
+
+Distribute traffic across multiple servers.
+
+### Replication
+
+Maintain multiple copies of data to improve availability or read scalability.
+
+### Graceful degradation
+
+Keep essential functionality available even if a non-critical dependency fails.
+
+### Requirement clarification
+
+Understand the problem before selecting technologies.
+
+---
+
+## Anti-patterns
+
+### Single point of failure
+
+One component failure can stop the entire system.
+
+### Tight coupling
+
+Components know too much about each other and cannot evolve independently.
+
+### Technology-first design
+
+Selecting a database, framework, or microservices before understanding the requirements.
+
+### Happy-path-only design
+
+Ignoring timeouts, retries, duplicates, partial failures, and recovery.
+
+### Premature over-engineering
+
+Adding complexity without evidence that it is needed.
+
+### Launch-only thinking
+
+Designing version one without considering data growth, maintenance, or migration.
+
+### Elegance over business fit
+
+Choosing a technically impressive design that is too expensive or complex for the actual problem.
+
+### Distributed monolith
+
+Creating multiple services that remain tightly dependent on one another.
+
+---
+
+# 16. Design Decision Framework
+
+## When should requirements be explored more deeply?
+
+Go deeper when:
+
+- The problem statement is vague
+- Different user types exist
+- The feature hides edge cases
+- Business rules affect architecture
+- Scale assumptions are missing
+- Data-loss consequences are unclear
+- Security requirements are unclear
+
+## When should NFRs be quantified?
+
+Always, especially when:
+
+- Latency matters
+- Throughput matters
+- Traffic scale matters
+- Uptime matters
+- Security matters
+- Compliance matters
+- Cost matters
+
+## When should estimation happen early?
+
+Estimate early when:
+
+- Media files are involved
+- Large storage is expected
+- High throughput is expected
+- Large concurrency is expected
+- Cost can affect architecture
+- The system is expected to operate at large scale
+
+## When should you stay at a high level?
+
+Do not over-dive when:
+
+- Requirements are still unclear
+- Time is limited
+- Breadth is needed before depth
+- The audience has not requested deeper details
+- The component is not critical to the problem
+
+## When is complexity justified?
+
+Add complexity when it solves a demonstrated:
+
+- Requirement
+- Bottleneck
+- Failure mode
+- Scalability issue
+- Security requirement
+- Business constraint
+
+---
+
+# 17. Design Review Checklist
+
+When reviewing a design, ask:
+
+1. What exact problem are we solving?
+2. Who are the users?
+3. What are the must-have requirements?
+4. What is out of scope?
+5. Which assumptions do we lack evidence for?
+6. What happens at 10 times traffic?
+7. What happens at 100 times data?
+8. What fails first?
+9. Where is the single point of failure?
+10. Which trade-offs are intentional?
+11. What happens if a dependency fails?
+12. Are we optimizing for reads, writes, storage, CPU, or bandwidth?
+13. What will become expensive after one year?
+14. Can the design evolve without a painful migration?
+15. Is the consistency requirement clear?
+16. Are retry operations safe?
+17. Are operations idempotent where necessary?
+18. Is observability sufficient?
+19. Are backup and recovery requirements satisfied?
+20. Is the complexity justified?
+
+---
+
+# 18. Real-World Product Mapping
+
+These products are useful examples for understanding workloads. They should not be copied blindly.
+
+## Netflix
+
+Useful for understanding:
+
+- Global content delivery
+- Streaming bandwidth
+- High read traffic
+- Horizontal scalability
+- CDN usage
+
+## Amazon
+
+Useful for understanding:
+
+- High-volume commerce
+- Business impact of latency
+- Order reliability
+- Cart behavior
+- Payment and inventory concerns
+
+## Instagram
+
+Useful for understanding:
+
+- Media-heavy workloads
+- Feed reads
+- Photo storage
+- Image processing
+- Storage growth
+- CDN delivery
+
+## Uber
+
+Useful for understanding:
+
+- Real-time location updates
+- Driver and rider matching
+- Cancellation flows
+- Workflow edge cases
+- Real-time communication
+
+## Twitter-like platform
+
+Useful for understanding:
+
+- Posting vs timeline reads
+- Read/write ratios
+- Timeline generation
+- Fan-out
+- QPS estimation
+
+## YouTube
+
+Useful for understanding:
+
+- Video storage
+- Video processing
+- Transcoding
+- Streaming bandwidth
+- CDN delivery
+
+Architecture decisions should always follow the product’s requirements, workload, and business context.
+
+---
+
+# 19. Mini Case Study 1: Social Posting Platform
+
+## Problem
+
+Design a simple social posting platform.
+
+Users should be able to:
+
+- Sign up
+- Create text posts
+- Follow other users
+- View a timeline
+
+The founder says:
+
+```text
+Let us keep it simple for now.
+```
+
+---
+
+## 19.1 Functional requirements
+
+### Must-have
+
+- A user can register
+- A user can sign in
+- A user can create a text post
+- A user can follow another user
+- A user can unfollow another user
+- A user can view a timeline
+- A user can view another user’s profile
+- A user can view posts created by another user
+
+### Possible future features
+
+- Likes
+- Comments
+- Reposts
+- Search
+- Media posts
+- Notifications
+- Private accounts
+- Recommendations
+
+---
+
+## 19.2 Non-functional requirements
+
+Clarify:
+
+- Timeline latency target
+- Post creation latency
+- Post visibility delay
+- Availability target
+- Data retention
+- Maximum post size
+- Concurrent users
+- Security expectations
+- Privacy expectations
+- Backup and recovery expectations
+
+If exact numbers are not given in an interview, state reasonable assumptions clearly.
+
+---
+
+## 19.3 Hidden requirements
+
+Ask:
+
+- Is the timeline chronological or ranked?
+- Are accounts public or private?
+- Can posts be edited?
+- Can posts be deleted?
+- Is deletion permanent?
+- Can users block one another?
+- What happens to old posts?
+- What happens after unfollowing?
+- Is media included?
+- How fresh must the timeline be?
+- Are celebrity users expected?
+- Are notifications required?
+- Is search required?
+
+---
+
+## 19.4 Traffic assumptions
+
+Estimate:
+
+- Daily active users
+- Posts per user per day
+- Timeline views per user per day
+- Average post size
+- Follow operations per day
+- Read/write ratio
+- Average QPS
+- Peak QPS
+- Annual storage
+
+A social timeline is generally read-heavy, but always state the assumption.
+
+---
+
+## 19.5 Initial high-level design
+
+```text
+Web / Mobile Client
+        ↓
+   Load Balancer
+        ↓
+Application Servers
+   ├── User Logic
+   ├── Follow Logic
+   ├── Post Logic
+   └── Timeline Logic
+        ↓
+  Relational Database
+        ↓
+       Cache
+```
+
+Possible initial components:
+
+- Web or mobile client
+- Load balancer
+- Application server
+- Relational database
+- Cache
+- Basic monitoring
+
+For an early startup, a modular monolith and relational database may be sufficient if they satisfy expected scale and reliability.
+
+---
+
+## 19.6 Likely future bottleneck
+
+Timeline generation may become harder than post creation.
+
+Creating a post is mainly a write.
+
+A timeline must:
+
+- Fetch posts from followed users
+- Order the posts
+- Apply privacy rules
+- Return results quickly
+- Handle repeated feed reads
+- Remain fresh
+
+Possible future timeline strategies:
+
+- Generate during reads
+- Generate during writes
+- Use a hybrid model
+
+The correct choice depends on:
+
+- Posting frequency
+- Follower distribution
+- Celebrity users
+- Feed freshness
+- Read volume
+- Infrastructure cost
+
+---
+
+# 20. Mini Case Study 2: Photo-Sharing Service
+
+## Problem
+
+Design a regional photo-sharing service.
+
+Users can:
+
+- Upload photos
+- View feeds
+- Like photos
+- Follow users
+
+Expected launch scale:
+
+```text
+100,000 daily active users
+```
+
+Expected future growth:
+
+```text
+10 million users in two years
+```
+
+---
+
+## 20.1 Must-have functional requirements
+
+- Register and sign in
+- Upload a photo
+- Create a photo post
+- Follow and unfollow users
+- View a feed
+- Like and unlike a photo
+- View user profiles
+- View user posts
+
+## Possible future features
+
+- Comments
+- Stories
+- Videos
+- Search
+- Recommendations
+- Private accounts
+- Content moderation
+- Notifications
+
+---
+
+## 20.2 Non-functional requirements
+
+Clarify:
+
+- Maximum image size
+- Supported image formats
+- Upload latency
+- Feed latency
+- Image durability
+- Availability target
+- Security requirements
+- Privacy requirements
+- Regional traffic
+- Backup requirements
+- Recovery requirements
+- Cost limits
+
+---
+
+## 20.3 What should be estimated first?
+
+Estimate:
+
+- Photos uploaded per day
+- Average photo size
+- Number of resized versions
+- Size of each resized version
+- Data retention
+- Replication overhead
+- Daily storage growth
+- Annual storage growth
+- Feed reads per user
+- Image views per post
+- Upload bandwidth
+- Download bandwidth
+- Average QPS
+- Peak QPS
+
+---
+
+## 20.4 High-level design
+
+```text
+Web / Mobile Client
+          ↓
+      API Layer
+    ├── User Logic
+    ├── Follow Logic
+    ├── Feed Logic
+    ├── Metadata Database
+    ├── Cache
+    └── Upload Coordination
+              ↓
+        Object Storage
+              ↓
+        Image Processing
+              ↓
+             CDN
+```
+
+---
+
+## 20.5 Important trade-offs
+
+- Simplicity vs future scale
+- Image quality vs storage cost
+- Image quality vs bandwidth
+- Feed freshness vs computation cost
+- Redundancy vs cost
+- Direct upload vs application-server upload
+- Synchronous vs asynchronous image processing
+- Launch speed vs future flexibility
+
+---
+
+## 20.6 Future evolution
+
+As the system grows, it may need:
+
+- CDN image delivery
+- Asynchronous image processing
+- Multiple image resolutions
+- Stronger caching
+- Database read replicas
+- Database partitioning
+- Advanced feed generation
+- Better observability
+- Regional deployments
+- Content moderation systems
+
+Do not deploy every future component on day one.
+
+Build a simple launch architecture with a reasonable evolution path.
+
+---
+
+## 20.7 Likely dominant concerns
+
+- Media storage
+- Download bandwidth
+- Image delivery latency
+- Feed reads
+- Image processing
+- CDN cost
+- Long-term storage cost
+
+---
+
+# 21. Interview Preparation
+
+## 21.1 Why is system design separate from coding?
+
+Coding focuses on implementing a feature correctly.
+
+System design focuses on how the complete system behaves under:
+
+- Scale
+- Failure
+- Cost
+- Data growth
+- Security requirements
+- Long-term change
+
+---
+
+## 21.2 Why can correct code fail in production?
+
+Production introduces:
+
+- High traffic
+- Concurrency
+- Dependency failures
+- Network problems
+- Data growth
+- Traffic spikes
+- Operational constraints
+- Changing requirements
+
+---
+
+## 21.3 Why are trade-offs important?
+
+Quality attributes can conflict.
+
+Improving one may affect another.
+
+Examples:
+
+- Consistency vs availability
+- Cost vs redundancy
+- Security vs performance
+- Simplicity vs flexibility
+- Latency vs freshness
+
+---
+
+## 21.4 Why think about failure early?
+
+Failure-handling requirements influence:
+
+- Data safety
+- Availability
+- Retries
+- Idempotency
+- Redundancy
+- Recovery
+- User experience
+
+Adding failure handling too late may require major redesign.
+
+---
+
+## 21.5 Why do requirements drive architecture?
+
+Different requirements produce different architectures.
+
+For example:
+
+- A payment system prioritizes correctness and consistency
+- A social feed may tolerate temporary stale data
+- A video platform needs large storage and bandwidth
+- A chat application may require real-time connections
+
+---
+
+## 21.6 Why must NFRs be measurable?
+
+A measurable requirement can be:
+
+- Validated
+- Tested
+- Monitored
+- Used for architectural decisions
+
+Words such as "fast" and "scalable" are not enough.
+
+---
+
+## 21.7 Why does peak traffic matter?
+
+A system may work under average traffic and fail during its busiest period.
+
+Capacity planning must account for:
+
+- Peak traffic
+- Unexpected spikes
+- Failures
+- Maintenance
+- Growth
+
+---
+
+## 21.8 WhatsApp-like application questions
+
+If someone says, "Build a WhatsApp-like app," ask:
+
+- One-to-one chat or group chat?
+- Text only or media?
+- Are read receipts required?
+- Are delivery receipts required?
+- Is typing status required?
+- Is message ordering required?
+- Is offline delivery required?
+- Is multi-device support required?
+- Is search required?
+- What is the retention policy?
+- Is end-to-end encryption required?
+- How many users?
+- How many messages per day?
+- What latency is expected?
+- What availability is expected?
+
+---
+
+## 21.9 What does "scale well" mean?
+
+Clarify:
+
+- Total users
+- Daily active users
+- Concurrent users
+- Requests per user
+- Read/write ratio
+- Data growth
+- Peak traffic
+- Regional distribution
+- Growth horizon
+
+---
+
+## 21.10 What should be estimated for media uploads?
+
+Estimate:
+
+- Upload count
+- Average file size
+- Maximum file size
+- Number of variants
+- Processing cost
+- Retention
+- Storage growth
+- Replication
+- Upload bandwidth
+- Download bandwidth
+- View frequency
+- CDN impact
+
+---
+
+## 21.11 What concerns should be raised before using microservices?
+
+Ask:
+
+- Is independent scaling required?
+- Are team boundaries clear?
+- Is independent deployment required?
+- Is fault isolation required?
+- Is the team operationally ready?
+- Are service boundaries understood?
+- Can a modular monolith satisfy current requirements?
+- Is the additional complexity justified?
+
+---
+
+## 21.12 Questions for 99.99% availability
+
+Ask:
+
+- Which workflows require this target?
+- What is the business impact of downtime?
+- Does the target apply globally?
+- Does it apply regionally?
+- What maintenance policy is acceptable?
+- What cost is acceptable?
+- What recovery expectation exists?
+- Which dependencies affect the target?
+
+---
+
+## 21.13 How do we make "search should be fast" useful?
+
+Clarify:
+
+- Expected query volume
+- Dataset size
+- Query complexity
+- Freshness requirements
+- Relevance expectations
+- Percentile latency target
+- Peak throughput
+
+---
+
+## Interview communication template
+
+```text
+1. I will clarify requirements and scope.
+2. I will state my scale assumptions.
+3. I will estimate the workload.
+4. I will propose a high-level design.
+5. I will explain critical read and write paths.
+6. I will discuss data storage.
+7. I will identify bottlenecks.
+8. I will discuss failure handling.
+9. I will explain trade-offs.
+10. I will finish with scaling and cost.
+```
+
+---
+
+# 22. Common Mistakes
+
+## Mistake 1: Starting with technology
+
+Wrong approach:
+
+```text
+I will use Kafka, Redis, MongoDB, and Kubernetes.
+```
+
+Better approach:
+
+```text
+First, let us clarify requirements, scale, and constraints.
+```
+
+## Mistake 2: Accepting vague NFRs
+
+Words such as these are not sufficient:
+
+- Fast
+- Reliable
+- Scalable
+- Secure
+- Highly available
+
+They should be made measurable.
+
+## Mistake 3: Assuming there is one correct architecture
+
+Most system design problems support multiple valid solutions.
+
+The important part is explaining:
+
+- Why a choice was made
+- Which requirement it supports
+- Which disadvantage it introduces
+- How the disadvantage is managed
+
+## Mistake 4: Assuming scale means microservices
+
+Microservices introduce:
+
+- Network calls
+- Distributed failures
+- Deployment complexity
+- Monitoring complexity
+- Data consistency challenges
+- Operational cost
+
+Use them when their benefits justify these costs.
+
+## Mistake 5: Ignoring hidden flows
+
+Do not ignore:
+
+- Delete
+- Edit
+- Retry
+- Cancel
+- Restore
+- Block
+- Expire
+- Duplicate requests
+- Partial failures
+
+## Mistake 6: Designing only for average traffic
+
+Always consider:
+
+- Peak traffic
+- Special events
+- Traffic spikes
+- Failure capacity
+- Utilization headroom
+
+## Mistake 7: Over-engineering
+
+Do not build complex infrastructure without evidence that it is needed.
+
+## Mistake 8: Ignoring future migration cost
+
+A simple current design is useful, but it should not make reasonable future evolution impossible.
+
+## Mistake 9: Ignoring observability
+
+Without logs, metrics, traces, and alerts, the team may not know:
+
+- What failed
+- Why it failed
+- Which users were affected
+- How to recover
+
+## Mistake 10: Running at 100% capacity
+
+Leave headroom for:
+
+- Traffic spikes
+- Maintenance
+- Failures
+- Growth
+- Uneven load
+
+---
+
+# 23. Myth vs Reality
+
+| Myth | Reality |
+|---|---|
+| System design is only for major technology-company interviews | It matters for any growing product |
+| Good code automatically creates good architecture | Correct code can exist inside a weak system |
+| There is one correct architecture | Designs depend on context and trade-offs |
+| Functional requirements are enough | Non-functional requirements often drive architecture |
+| Estimation is random guessing | Explicit assumptions and rough math improve decisions |
+| Seniority depends only on coding years | Architectural judgment is an important senior skill |
+| Microservices are always more scalable | They introduce distributed-system complexity |
+| More technology means a better design | The best design is the simplest one that satisfies requirements |
+| Every system must support massive scale from day one | Architecture should follow realistic requirements |
+| An architect never needs implementation detail | Architects decide where detail matters |
+
+---
+
+# 24. Glossary
+
+## Architecture
+
+The high-level structure of a system, including components, interactions, and major decisions.
+
+## Availability
+
+The percentage of time a system remains operational and accessible.
+
+## Back-of-the-envelope estimation
+
+Fast, approximate calculation used to understand scale and guide decisions.
+
+## Detailed design
+
+A deeper view of critical workflows, APIs, schemas, storage, and trade-offs.
+
+## Functional requirement
+
+A statement describing what the system must do.
+
+## High-level design
+
+A bird’s-eye view of major components and data flow.
+
+## Horizontal scaling
+
+Adding more machines or instances to handle increasing load.
+
+## Latency
+
+The time taken for an operation or request to complete.
+
+## Loose coupling
+
+A design where components depend on clear contracts and have limited knowledge of one another.
+
+## MVP
+
+Minimum viable product, the smallest product version that provides core value.
+
+## Non-functional requirement
+
+A statement describing how well the system must behave.
+
+## Peak traffic
+
+The highest load the system must handle during a busy period.
+
+## QPS
+
+Queries or requests handled per second.
+
+## Reliability
+
+The ability of a system to continue producing correct results and preserve expected behavior despite failures.
+
+## Scalability
+
+The ability of a system to handle increasing load.
+
+## Single point of failure
+
+A component whose failure can stop the complete system or a critical workflow.
+
+## System design
+
+The process of structuring a system to satisfy business and technical needs under real-world conditions.
+
+## Trade-off
+
+A decision where improving one attribute can weaken another attribute.
+
+## Vertical scaling
+
+Increasing the capacity of one machine.
+
+## Redundancy
+
+Maintaining additional instances or copies to improve resilience.
+
+## Replication
+
+Maintaining multiple copies of data.
+
+## Idempotency
+
+The property where repeating the same operation produces the same intended result without unwanted duplicate effects.
+
+## Throughput
+
+The amount of work processed during a period of time.
+
+## Concurrency
+
+The number of simultaneous operations, users, or connections.
+
+---
+
+# 25. FAQs
+
+## Do I need system design if I am already a good developer?
+
+Yes.
+
+Development skills help you implement features.
+
+System design helps you decide what should be built and how it should behave under scale, failure, cost, and change.
+
+## Is system design only useful for large companies?
+
+No.
+
+Any growing product can face:
+
+- Performance problems
+- Reliability problems
+- Cost problems
+- Data growth
+- Maintenance problems
+- Security problems
+
+## Do estimations need exact numbers?
+
+No.
+
+Use reasonable assumptions and directionally correct estimates.
+
+State assumptions clearly.
+
+## Are requirements gathering and architecture separate?
+
+No.
+
+Requirements directly shape architecture choices.
+
+## Is there always one best architecture?
+
+Usually not.
+
+Different designs prioritize different requirements and trade-offs.
+
+## Should every system be designed for massive scale?
+
+No.
+
+Design with future awareness, but do not add complexity that current or reasonably expected requirements do not justify.
+
+## Should I always use microservices?
+
+No.
+
+Use microservices when their benefits justify their complexity.
+
+Possible benefits include:
+
+- Independent deployment
+- Independent scaling
+- Team ownership
+- Fault isolation
+
+## Do I need estimation in interviews?
+
+When scale influences the design, estimation shows that your component choices are connected to actual workload assumptions rather than memorized diagrams.
+
+---
+
+# 26. Self-Test
+
+Try answering these without notes.
+
+## Core understanding
+
+- [ ] Explain why system design matters in one minute
+- [ ] Explain coding vs system design
+- [ ] Explain developer vs architect thinking
+- [ ] Explain why trade-offs are unavoidable
+- [ ] Explain why failure thinking matters
+
+## Requirements
+
+- [ ] Give three functional requirements
+- [ ] Give three non-functional requirements
+- [ ] Convert "fast" into a measurable requirement
+- [ ] Identify hidden requirements for delete and retry
+- [ ] Separate MVP requirements from future features
+
+## Estimation
+
+- [ ] Estimate requests per day
+- [ ] Estimate average QPS
+- [ ] Estimate peak QPS
+- [ ] Estimate daily storage
+- [ ] Estimate annual storage
+- [ ] Estimate bandwidth
+- [ ] Explain replication overhead
+- [ ] Estimate server count with headroom
+
+## Design process
+
+- [ ] Explain the four design steps
+- [ ] Draw a clean high-level architecture
+- [ ] Identify the read path
+- [ ] Identify the write path
+- [ ] Find likely bottlenecks
+- [ ] Discuss failure handling
+- [ ] Discuss cost
+
+## Trade-offs
+
+- [ ] Explain consistency vs availability
+- [ ] Explain simplicity vs flexibility
+- [ ] Explain security vs performance
+- [ ] Explain cost vs redundancy
+- [ ] Explain launch speed vs maintainability
+
+## Patterns
+
+- [ ] Explain caching
+- [ ] Explain redundancy
+- [ ] Explain loose coupling
+- [ ] Explain asynchronous processing
+- [ ] List three anti-patterns
+
+---
+
+# 27. One-Page Revision Sheet
+
+## What is system design?
+
+System design is the process of structuring a system so that it satisfies functional requirements and real-world quality requirements such as:
+
+- Performance
+- Scalability
+- Availability
+- Reliability
+- Security
+- Maintainability
+- Cost
+
+## Why does it matter?
+
+Correct code can still fail because of:
+
+- Traffic
+- Data growth
+- Bottlenecks
+- Dependency failures
+- Network problems
+- Poor recovery
+- Weak security
+- Excessive cost
+
+## Developer vs architect
+
+```text
+Developer:
+How do I implement this feature?
+
+Architect:
+What system structure fits the requirements,
+and how will that system behave under
+scale, failure, cost, and change?
+```
+
+## Functional vs non-functional requirements
+
+```text
+Functional requirement:
+What the system must do
+
+Non-functional requirement:
+How well the system must do it
+```
+
+Example:
+
+```text
+Functional:
+A user can upload a photo.
+
+Non-functional:
+The system must support the expected peak upload
+throughput while meeting the agreed latency target.
+```
+
+## Important estimation formulas
+
+```text
+Daily requests =
+DAU × Requests per user per day
+```
+
+```text
+Average QPS =
+Daily requests / 86,400
+```
+
+```text
+Peak QPS =
+Average QPS × Peak factor
+```
+
+```text
+Daily storage =
+Objects per day × Average object size
+```
+
+```text
+Annual storage =
+Daily storage × 365
+```
+
+```text
+Base server count =
+Peak QPS / Safe QPS per server
+```
+
+```text
+Bandwidth in bits per second =
+Bytes per second × 8
+```
+
+## Four-step framework
+
+```text
+1. Gather requirements
+2. Create high-level design
+3. Dive into critical details
+4. Scale and optimize
+```
+
+## Architect thinking order
+
+```text
+Requirements
+    ↓
+Scope
+    ↓
+Scale
+    ↓
+Components
+    ↓
+Workflows
+    ↓
+Data model
+    ↓
+Bottlenecks
+    ↓
+Trade-offs
+    ↓
+Failures
+    ↓
+Cost
+    ↓
+Evolution
+```
+
+## Important reminders
+
+- Start with requirements, not technology
+- Separate functional and non-functional requirements
+- Make NFRs measurable
+- State assumptions
+- Estimate peak traffic, not only average traffic
+- Leave utilization headroom
+- Think about failures and recovery
+- Consider cost
+- Avoid unnecessary complexity
+- Explain every major choice as a trade-off
+
+---
+
+# 28. Top 10 Points
+
+1. Coding and system design are different but complementary skills.
+2. A feature that works at small scale can fail at large scale.
+3. Architects think in trade-offs, not theoretical perfection.
+4. Failure scenarios must be considered from the beginning.
+5. Requirements must be clarified before architecture is proposed.
+6. Functional requirements define what the system does.
+7. Non-functional requirements define how well the system behaves.
+8. Non-functional requirements should be measurable.
+9. Peak traffic, redundancy, and capacity headroom matter.
+10. Use the four-step framework for every system design problem.
+
+---
+
+# Final Takeaway
+
+This section does not teach one architecture.
+
+It teaches how to reason about every architecture.
+
+Without this foundation, concepts such as:
+
+- Databases
+- Caching
+- Message queues
+- APIs
+- CDNs
+- Replication
+- Sharding
+- Microservices
+- Load balancing
+
+can become isolated technologies that we simply memorize.
+
+With this foundation, these technologies become tools selected according to:
+
+- Requirements
+- Constraints
+- Scale
+- Failure modes
+- Trade-offs
+- Cost
+- Business context
+
+```text
+Do not begin with:
+
+"Which technology should I use?"
+
+Begin with:
+
+"What problem are we solving,
+at what scale,
+under which constraints,
+and which trade-offs are acceptable?"
+```
