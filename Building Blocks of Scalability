@@ -1,0 +1,2224 @@
+# Section 2: Building Blocks of Scalability
+
+## 1. Overview
+
+This section covers the fundamental patterns used to build scalable, available, and resilient systems:
+
+- Vertical scaling
+- Horizontal scaling
+- Load balancing
+- Load-balancing algorithms
+- Stateless services
+- Service discovery
+- Circuit breakers
+- Timeouts
+- Retries
+- Fallbacks
+- Graceful degradation
+
+> Scalability is not simply adding more servers. A scalable system must allow servers to be added, removed, replaced, discovered, routed to, and protected without breaking the user experience.
+
+---
+
+## 2. Complete Scalability Mental Model
+
+```text
+Increasing Traffic
+        |
+        v
+Identify the Bottleneck
+        |
+        +--> CPU
+        +--> Memory
+        +--> Disk
+        +--> Network
+        +--> Database
+        +--> External Dependency
+        |
+        v
+Vertical Scaling
+        |
+        | Hardware, cost, or availability limits
+        v
+Horizontal Scaling
+        |
+        +--> Load Balancing
+        +--> Stateless Services
+        +--> Shared Storage
+        +--> Centralized Logging
+        +--> Health Checks
+        +--> Service Discovery
+        +--> Autoscaling
+        |
+        v
+Distributed Dependencies
+        |
+        +--> Timeouts
+        +--> Limited Retries
+        +--> Backoff
+        +--> Circuit Breakers
+        +--> Fallbacks
+        +--> Monitoring
+```
+
+### Pattern Relationships
+
+```text
+Horizontal Scaling
+        requires
+Stateless Services
+        require
+External Shared State
+
+Multiple Servers
+        require
+Load Balancing
+
+Dynamic Service Instances
+        require
+Service Discovery
+
+Distributed Dependencies
+        require
+Timeouts + Retries + Circuit Breakers + Fallbacks
+```
+
+---
+
+# 3. Vertical Scaling
+
+## Definition
+
+Vertical scaling means increasing the power of an existing machine.
+
+It is also called **scaling up**.
+
+Resources that can be increased:
+
+- CPU
+- RAM
+- Disk capacity
+- Disk speed
+- Network capacity
+
+## Example
+
+```text
+Before:
+
+Server
+- 2 CPUs
+- 4 GB RAM
+
+After vertical scaling:
+
+Server
+- 16 CPUs
+- 64 GB RAM
+```
+
+The number of servers remains the same. The existing server becomes more powerful.
+
+## Advantages
+
+- Simple to understand
+- Requires minimal code changes
+- Fewer moving parts
+- Easier monitoring
+- Easier debugging
+- Easier backup and recovery
+- No distributed coordination
+- Useful as a quick solution
+
+## Limitations
+
+- Hardware has physical limits
+- High-end machines become expensive
+- The machine remains a single point of failure
+- Upgrades may require downtime
+- Limited fault tolerance
+- Poor geographical distribution
+- Cannot scale indefinitely
+
+## Best Use Cases
+
+Use vertical scaling when:
+
+- The system is small or medium-sized
+- Traffic is predictable
+- Simplicity is important
+- The application is difficult to distribute
+- Operational complexity must remain low
+- A database needs more CPU or RAM
+- Downtime during upgrades is acceptable
+- A stronger machine solves the problem safely
+
+## Key Insight
+
+Vertical scaling is not bad.
+
+It is often the simplest and most practical starting point. It becomes insufficient when hardware limits, cost, downtime, availability, or regional latency become unacceptable.
+
+---
+
+# 4. Horizontal Scaling
+
+## Definition
+
+Horizontal scaling means adding more machines to handle increased load.
+
+It is also called **scaling out**.
+
+## Example
+
+```text
+Before:
+
+User --> Server 1
+```
+
+```text
+After:
+
+                  +--> Server 1
+User --> LB ------+--> Server 2
+                  +--> Server 3
+```
+
+Instead of making one server stronger, traffic is distributed across multiple servers.
+
+## Advantages
+
+- Capacity increases by adding servers
+- Better fault tolerance
+- Better availability
+- Supports autoscaling
+- Supports geographical distribution
+- One failure removes only part of the capacity
+- Avoids dependence on one giant machine
+- Often cost-effective at large scale
+
+## Limitations
+
+- Requires load balancing
+- Requires stateless service design
+- Requires shared storage
+- Requires centralized logging
+- Requires service discovery
+- Introduces network failures
+- Introduces consistency challenges
+- Requires distributed coordination
+- Deployments become more complex
+- Debugging becomes more complex
+- Scheduled jobs require coordination
+
+## Best Use Cases
+
+Use horizontal scaling when:
+
+- Traffic is growing quickly
+- High availability is required
+- Global users need lower latency
+- Workloads can be distributed
+- Autoscaling is useful
+- Fault tolerance is important
+- Cloud-native elasticity is required
+- One machine creates unacceptable risk
+
+## Requirements
+
+For horizontal scaling to work correctly:
+
+- Any server should handle any request
+- Sessions should not exist only in local memory
+- Files should not exist only on local disk
+- Logs should be centralized
+- Scheduled jobs should not run blindly on every server
+- Dependencies should have failure protection
+- Traffic should be distributed intelligently
+
+---
+
+# 5. Vertical vs Horizontal Scaling
+
+| Factor | Vertical Scaling | Horizontal Scaling |
+|---|---|---|
+| Meaning | Increase one machine's power | Add more machines |
+| Other name | Scale up | Scale out |
+| Complexity | Lower | Higher |
+| Code changes | Usually minimal | Architectural changes may be required |
+| Hardware limit | Yes | Capacity grows by adding machines |
+| Fault tolerance | Limited | Better |
+| Single point of failure | More likely | Reduced with proper design |
+| Geographical distribution | Difficult | Supported |
+| Autoscaling | Limited | Natural fit |
+| State management | Easier | Must be carefully designed |
+| Load balancer | Usually unnecessary | Required |
+| Best for | Early and simple systems | Large distributed systems |
+
+## Decision Rule
+
+```text
+If one stronger machine solves the problem cheaply and safely:
+    Use vertical scaling.
+
+If one machine creates unacceptable risk, cost, downtime, or latency:
+    Move toward horizontal scaling.
+
+If immediate relief and long-term scalability are both required:
+    Use a hybrid approach.
+```
+
+## Common Hybrid Strategy
+
+```text
+Application Servers --> Scale Horizontally
+
+Database --> Scale Vertically First
+```
+
+Stateless application servers are easier to distribute than stateful databases.
+
+---
+
+# 6. Questions to Ask Before Scaling
+
+1. What is the current bottleneck?
+2. Is it CPU, memory, disk, network, or database?
+3. Is an external dependency causing the problem?
+4. Can a stronger machine solve it safely?
+5. Are we approaching hardware limits?
+6. Is high availability required?
+7. Is geographical distribution required?
+8. Is downtime acceptable?
+9. Can the workload be distributed?
+10. Is the application stateless?
+11. Can any server process any request?
+12. Where is user state stored?
+13. Where are uploaded files stored?
+14. How will traffic be distributed?
+15. How will unhealthy servers be removed?
+16. How will services discover one another?
+17. What happens when a dependency becomes slow?
+18. Can the system degrade gracefully?
+19. Can the team manage the additional complexity?
+20. Is the architecture more complex than the problem requires?
+
+> Choose the simplest design that satisfies scale, availability, reliability, cost, and operational requirements.
+
+---
+
+# 7. Load Balancing
+
+## Definition
+
+A load balancer distributes incoming traffic across multiple backend servers.
+
+It provides clients with one stable endpoint while hiding backend instances.
+
+```text
+                     +--> Server A
+Client --> LB -------+--> Server B
+                     +--> Server C
+```
+
+## Responsibilities
+
+A load balancer can:
+
+- Receive incoming traffic
+- Select a backend server
+- Forward requests
+- Return responses
+- Perform health checks
+- Remove unhealthy servers
+- Restore recovered servers
+- Support automatic failover
+- Support blue-green deployments
+- Support canary deployments
+- Perform SSL termination
+- Perform compression
+- Apply rate limiting
+- Provide WAF protection
+- Protect backend servers from overload
+
+## Why It Is Needed
+
+Without a load balancer:
+
+- Clients may need individual server addresses
+- Traffic distribution becomes difficult
+- Failed servers may continue receiving traffic
+- Deployments become risky
+- Horizontal scaling becomes difficult to manage
+
+---
+
+# 8. Health Checks
+
+Health checks determine whether a backend server should receive traffic.
+
+```text
+Load Balancer
+    |
+    +--> Server A: Healthy   --> Receives traffic
+    +--> Server B: Unhealthy --> Removed from rotation
+    +--> Server C: Healthy   --> Receives traffic
+```
+
+## Liveness
+
+Checks whether the application process is running.
+
+## Readiness
+
+Checks whether the application is ready to serve real requests.
+
+A readiness check may verify:
+
+- Application initialization
+- Required internal resources
+- Database connectivity
+- Connection-pool health
+- Required configuration
+- Ability to process requests
+
+## Common Mistake
+
+A health check verifies only that the process is alive.
+
+The process may be running while the application is unable to serve users correctly.
+
+## Load Balancer Availability
+
+A single load balancer can become a single point of failure.
+
+Production systems should consider:
+
+- Redundant load balancers
+- Health monitoring
+- Automatic failover
+- Capacity planning
+- Regional traffic routing
+
+---
+
+# 9. Layer 4 Load Balancing
+
+Layer 4 operates at the transport layer.
+
+It uses:
+
+- IP address
+- Port
+- TCP information
+- UDP information
+
+## Advantages
+
+- Fast
+- Low processing overhead
+- Suitable for high-throughput traffic
+- Useful for connection-level routing
+
+## Limitations
+
+It cannot normally route using:
+
+- URL paths
+- HTTP methods
+- HTTP headers
+- Cookies
+- Request bodies
+
+---
+
+# 10. Layer 7 Load Balancing
+
+Layer 7 operates at the application layer.
+
+It understands HTTP information such as:
+
+- HTTP method
+- URL path
+- Headers
+- Cookies
+- Request content
+
+## Example
+
+```text
+/api/orders/* --> Order Service
+/api/users/*  --> User Service
+/images/*     --> Media Service
+/beta/*       --> Beta Servers
+```
+
+## Advantages
+
+- Intelligent routing
+- Path-based routing
+- Header-based routing
+- Cookie-based routing
+- Routing beta users to beta servers
+- Advanced deployment strategies
+
+## Limitations
+
+- More processing overhead
+- More complex configuration
+- Requires application-protocol awareness
+
+## Layer 4 vs Layer 7
+
+| Factor | Layer 4 | Layer 7 |
+|---|---|---|
+| Layer | Transport | Application |
+| Uses | IP, port, TCP, and UDP | URL, method, headers, and cookies |
+| Speed | Generally faster | More processing required |
+| Routing intelligence | Limited | Advanced |
+| HTTP awareness | No | Yes |
+| Configuration | Simpler | More complex |
+| Best for | Connection routing | Intelligent application routing |
+
+---
+
+# 11. Load-Balancing Algorithms
+
+The algorithm determines how the load balancer chooses a backend server.
+
+Main algorithms:
+
+1. Round robin
+2. Weighted round robin
+3. Least connections
+4. IP hash
+5. Consistent hashing
+
+---
+
+# 12. Round Robin
+
+Round robin sends requests to servers one by one in a repeating cycle.
+
+```text
+Request 1 --> Server A
+Request 2 --> Server B
+Request 3 --> Server C
+Request 4 --> Server A
+Request 5 --> Server B
+```
+
+## Use When
+
+- Servers have similar capacity
+- Requests have similar processing costs
+- Predictable distribution is sufficient
+- Simplicity is important
+
+## Advantages
+
+- Simple
+- Predictable
+- Easy to configure
+- Easy to understand
+- Easy to debug
+
+## Limitation
+
+Round robin distributes equal request counts, not equal amounts of work.
+
+```text
+Request 1 --> Fetch cached product
+Request 2 --> Generate large PDF
+Request 3 --> Upload large file
+```
+
+These requests require different amounts of CPU, memory, disk, and time.
+
+> Equal request count does not mean equal server load.
+
+---
+
+# 13. Weighted Round Robin
+
+Weighted round robin assigns different traffic shares based on server capacity or deployment strategy.
+
+```text
+Server A: Weight 4
+Server B: Weight 2
+Server C: Weight 1
+```
+
+Server A receives more traffic than Server B and Server C.
+
+## Use When
+
+- Servers have different capacities
+- Instance types are different
+- Regional capacity differs
+- Traffic must shift gradually
+- Canary deployments are required
+
+## Canary Example
+
+```text
+Old Version: 95%
+New Version: 5%
+```
+
+Traffic can be increased gradually:
+
+```text
+5% --> 25% --> 50% --> 95% --> 100%
+```
+
+Monitor:
+
+- Error rates
+- Latency
+- Resource usage
+- Business failures
+- Application health
+
+## Limitation
+
+Weights are usually predefined.
+
+Weighted round robin does not automatically understand live CPU, memory, latency, or server stress.
+
+---
+
+# 14. Least Connections
+
+Least connections sends a new request to the server with the fewest active connections.
+
+```text
+Server A: 100 active connections
+Server B: 40 active connections
+Server C: 70 active connections
+
+New request --> Server B
+```
+
+## Use When
+
+- Requests have different durations
+- WebSocket connections are used
+- Streaming is involved
+- Uploads take different amounts of time
+- Connections are long-lived
+- Workload duration is uneven
+
+## Advantage
+
+It considers active connections rather than only request count.
+
+## Limitation
+
+Connection count may not represent actual resource usage.
+
+```text
+Server A: 10 CPU-heavy connections
+Server B: 20 lightweight connections
+```
+
+Server A may be more overloaded even though it has fewer connections.
+
+---
+
+# 15. IP Hash
+
+IP hash uses the client's IP address to select a backend server.
+
+```text
+hash(clientIP) --> Backend Server
+```
+
+The same client IP generally returns to the same server.
+
+## Purpose
+
+It provides:
+
+- Session affinity
+- Sticky sessions
+
+## Use When
+
+- Session affinity is required
+- A legacy application stores sessions locally
+- The same client must return to the same server
+
+## Problems
+
+- Corporate NAT can place many users behind one IP
+- One server may receive too much traffic
+- Mobile users may change IP addresses
+- Moving from Wi-Fi to mobile data may break affinity
+- Adding or removing servers may remap many users
+- Failover becomes harder
+
+> IP hash can support legacy stateful behavior, but it should not replace proper stateless design.
+
+---
+
+# 16. Consistent Hashing
+
+Consistent hashing maps servers and keys onto a logical hash ring.
+
+```text
+                Server A
+                   |
+        Key 1 -----|------ Key 2
+       /                       \
+Server D                         Server B
+       \                       /
+        Key 4 -----|------ Key 3
+                   |
+                Server C
+```
+
+When a server is added or removed, only part of the key space moves.
+
+## Use When
+
+- Stable routing is required
+- Cache ownership matters
+- Distributed storage is used
+- Membership changes should cause minimal remapping
+- Controlled redistribution is important
+
+## Advantages
+
+- Reduces remapping when servers change
+- Useful for distributed caches
+- Useful for distributed storage
+- Supports stable key ownership
+
+## Limitations
+
+- More complex than simple hashing
+- Uneven distribution can occur
+- Virtual nodes may be required
+- Requires careful balancing
+
+---
+
+# 17. Algorithm Comparison
+
+| Algorithm | Best For | Main Risk |
+|---|---|---|
+| Round robin | Similar servers and requests | Ignores actual request cost |
+| Weighted round robin | Different capacities and gradual rollouts | Uses static weights |
+| Least connections | Long-lived or uneven requests | Connections may not equal load |
+| IP hash | Session affinity | Imbalance and remapping |
+| Consistent hashing | Stable routing and cache ownership | Additional complexity |
+
+## Selection Guide
+
+```text
+Similar servers + similar requests
+    --> Round robin
+
+Different server capacities
+    --> Weighted round robin
+
+Long-lived or uneven connections
+    --> Least connections
+
+Simple client affinity
+    --> IP hash
+
+Stable key ownership during scaling
+    --> Consistent hashing
+```
+
+There is no universally best algorithm. Choose based on workload characteristics.
+
+---
+
+# 18. Stateless Service Design
+
+## Definition
+
+A stateless service does not keep required user-specific state inside one server's local memory or local disk between requests.
+
+Each request either:
+
+- Contains the required information
+- Contains a token identifying the user
+- Retrieves state from shared storage
+
+## Stateful Problem
+
+```text
+User logs in
+    |
+    v
+Session stored in Server A
+    |
+    v
+Next request reaches Server B
+    |
+    v
+Server B does not know the user
+```
+
+This may force the system to use sticky sessions.
+
+## Stateless Design
+
+```text
+                 +--> Server A
+User --> LB -----+--> Server B
+                 +--> Server C
+                         |
+                         v
+                 Shared State Store
+                 Redis / Database
+```
+
+Any server can retrieve the required state.
+
+## Moving State Outside Servers
+
+| State | Better Location |
+|---|---|
+| Authentication identity | Token |
+| Session data | Redis or shared session store |
+| Shopping cart | Database or distributed cache |
+| Uploaded files | Object storage |
+| Background tasks | Queue |
+| Business data | Database |
+| Logs | Centralized logging system |
+| Temporary work | Queue or shared storage |
+| Configuration | External configuration system |
+
+## Key Principle
+
+```text
+Stateful design creates server dependency.
+
+Stateless design creates server replaceability.
+```
+
+## Important Clarification
+
+Stateless does not mean the system has no state.
+
+It means:
+
+> The individual application server does not own required user-specific state locally between requests.
+
+---
+
+# 19. Stateful vs Stateless Services
+
+| Factor | Stateful Service | Stateless Service |
+|---|---|---|
+| User state | Stored locally | Stored externally or passed with request |
+| Request routing | May require the same server | Any server can handle the request |
+| Sticky sessions | Often required | Usually unnecessary |
+| Server failure | Can lose user state | State remains in shared systems |
+| Scaling | Harder | Easier |
+| Failover | Difficult | Cleaner |
+| Deployment | Riskier | Easier |
+| Replaceability | Low | High |
+
+## Stateful Examples
+
+- Session object in server memory
+- Cart stored in local RAM
+- Uploaded file stored on local disk
+- Local cache required for correctness
+
+## Stateless Examples
+
+- Identity represented using a token
+- Session stored in Redis
+- Cart stored in a database
+- File stored in object storage
+- Work placed on a shared queue
+
+---
+
+# 20. Statelessness Checklist
+
+Before horizontally scaling a service, verify:
+
+- [ ] Sessions are stored outside application servers
+- [ ] Uploaded files use shared or object storage
+- [ ] User identity uses tokens or shared sessions
+- [ ] Any server can process any request
+- [ ] Local cache is optional rather than required for correctness
+- [ ] Background tasks use shared queues
+- [ ] Scheduled jobs are coordinated
+- [ ] Logs are centralized
+- [ ] Configuration is externalized
+- [ ] A server can fail without losing critical user state
+- [ ] New instances can join without manual state migration
+- [ ] Traffic can move away from a failed server safely
+
+If several answers are `No`, the service is not ready for clean horizontal scaling.
+
+---
+
+# 21. Service Discovery
+
+## Definition
+
+Service discovery allows services to find the current healthy instances of another service.
+
+It solves the problem of dynamic service locations.
+
+## Why It Is Needed
+
+Instances can:
+
+- Start
+- Stop
+- Crash
+- Restart
+- Move
+- Scale up
+- Scale down
+- Receive new IP addresses
+
+Hard-coded IP addresses cannot manage these changes reliably.
+
+## Basic Flow
+
+```text
+1. A service instance starts
+2. The instance registers itself
+3. The registry stores its address and health
+4. A caller requests the target service location
+5. The registry returns healthy instances
+6. The caller or proxy selects one instance
+```
+
+## Visual Flow
+
+```text
+Service A Instance 1 ----+
+Service A Instance 2 ----+--> Service Registry
+Service A Instance 3 ----+
+
+Service B --> Registry --> Healthy Service A Instances
+```
+
+## Service Registry Information
+
+A service registry may contain:
+
+- Service name
+- Instance address
+- Port
+- Health status
+- Availability
+- Metadata
+
+## When It Is Important
+
+- Multiple services exist
+- Services have multiple instances
+- Autoscaling is enabled
+- Containers are used
+- Instances change frequently
+- IP addresses are dynamic
+- Services communicate with one another
+
+---
+
+# 22. Client-Side Discovery
+
+The calling service queries the registry and selects an instance itself.
+
+```text
+Client Service
+      |
+      v
+Service Registry
+      |
+      v
+Healthy Instances
+      |
+      v
+Client selects one instance
+```
+
+## Advantages
+
+- Fewer network hops
+- Can use local caching
+- Client can make routing decisions
+- Direct communication with the selected instance
+
+## Disadvantages
+
+- Every client needs discovery logic
+- Language-specific libraries may be required
+- Routing logic becomes distributed
+- Client maintenance becomes harder
+
+---
+
+# 23. Server-Side Discovery
+
+The client calls a load balancer, proxy, or gateway.
+
+That component discovers and selects the backend instance.
+
+```text
+Client
+   |
+   v
+Load Balancer / Proxy
+   |
+   +--> Service Registry
+   |
+   v
+Healthy Service Instance
+```
+
+## Advantages
+
+- Simpler clients
+- Discovery logic is centralized
+- Language-agnostic
+- Easier operational control
+- Routing policies are managed centrally
+
+## Disadvantages
+
+- Adds another network hop
+- Proxy becomes critical infrastructure
+- Can add latency
+- Can become a bottleneck if poorly designed
+
+## Comparison
+
+| Factor | Client-Side | Server-Side |
+|---|---|---|
+| Instance selection | Client | Proxy or load balancer |
+| Client complexity | Higher | Lower |
+| Network hops | Fewer | Additional proxy hop |
+| Language dependency | Possible | Lower |
+| Routing control | Distributed | Centralized |
+| Operational management | Harder | Easier |
+
+---
+
+# 24. DNS Discovery vs Service Registry
+
+## DNS Discovery
+
+A service name resolves to one or more IP addresses.
+
+```text
+payment-service.internal
+        |
+        v
+10.0.1.10
+10.0.1.11
+10.0.1.12
+```
+
+### Good For
+
+- Simple environments
+- Kubernetes-style service names
+- Stable internal routing
+- Basic service lookup
+
+### Limitations
+
+- DNS caching can delay updates
+- Stale entries may remain temporarily
+- Health awareness may be limited
+- Advanced routing is harder
+
+## Dedicated Service Registry
+
+A dedicated registry tracks service instances and health.
+
+### Good For
+
+- Dynamic microservices
+- Autoscaling environments
+- Frequent instance changes
+- Client-side discovery
+- Rich health and metadata requirements
+
+### Limitations
+
+- Another system must be operated
+- Registry availability becomes important
+- Clients or proxies must integrate with it
+- Stale registration data must be handled
+
+---
+
+# 25. Circuit Breaker
+
+## Definition
+
+A circuit breaker prevents the system from repeatedly calling a slow or failing dependency.
+
+It behaves like an electrical circuit breaker.
+
+## Without a Circuit Breaker
+
+```text
+Dependency becomes slow
+        |
+        v
+Requests wait longer
+        |
+        v
+Threads become blocked
+        |
+        v
+Connection pool fills
+        |
+        v
+Server resources are exhausted
+        |
+        v
+Dependent services begin failing
+        |
+        v
+Cascade failure
+```
+
+## With a Circuit Breaker
+
+```text
+Repeated failures detected
+        |
+        v
+Circuit opens
+        |
+        v
+Calls fail fast
+        |
+        v
+Resources remain protected
+        |
+        v
+Dependency gets recovery time
+        |
+        v
+Fallback may be returned
+```
+
+## Benefits
+
+- Prevents repeated failed calls
+- Protects threads and connection pools
+- Reduces resource exhaustion
+- Prevents cascade failures
+- Allows failing dependencies to recover
+- Supports graceful degradation
+- Improves system stability
+
+## Useful Around
+
+- Payment providers
+- Inventory services
+- Recommendation services
+- Databases
+- Caches
+- External APIs
+- Internal services
+- Notification providers
+- Search systems
+- Map providers
+
+---
+
+# 26. Circuit Breaker States
+
+## Closed
+
+Normal state.
+
+```text
+Requests --> Dependency
+```
+
+The circuit breaker:
+
+- Allows requests
+- Records successes
+- Records failures
+- Monitors timeouts and error rates
+
+## Open
+
+The failure threshold has been crossed.
+
+```text
+Requests --> Fail Fast
+             Dependency is not called
+```
+
+Benefits:
+
+- Protects system resources
+- Prevents repeated failed calls
+- Gives the dependency recovery time
+
+## Half-Open
+
+After a recovery period, limited test requests are allowed.
+
+```text
+Limited Test Requests --> Dependency
+```
+
+If tests succeed:
+
+```text
+Half-Open --> Closed
+```
+
+If tests fail:
+
+```text
+Half-Open --> Open
+```
+
+## State Transition
+
+```text
+             Failure threshold crossed
+Closed --------------------------------> Open
+  ^                                      |
+  |                                      |
+  | Test requests succeed                | Recovery period
+  |                                      v
+  +--------------------------------- Half-Open
+                       Test fails --> Open
+```
+
+The half-open state tests whether the dependency has recovered instead of blocking it permanently.
+
+---
+
+# 27. Timeouts
+
+A timeout limits how long the caller waits for a response.
+
+```text
+If no response arrives within the limit:
+    Stop waiting and treat the call as failed.
+```
+
+## Purpose
+
+- Prevent waiting forever
+- Release threads
+- Release connections
+- Protect response latency
+- Detect slow dependencies
+- Reduce resource exhaustion
+
+> Every network call should have an appropriate timeout.
+
+---
+
+# 28. Retries
+
+A retry attempts an operation again after a failure.
+
+## Useful For
+
+- Temporary network failures
+- Short dependency interruptions
+- Transient errors
+
+## Risks
+
+Retries add more traffic to an already failing dependency.
+
+```text
+100 original requests
+Each request retries 3 times
+
+Maximum calls = 400
+```
+
+This can make an outage worse.
+
+## Safe Retry Practices
+
+Use:
+
+- Retry limits
+- Exponential backoff
+- Jitter
+- Timeouts
+- Idempotency
+- Circuit breakers
+- Error classification
+
+Do not retry indefinitely.
+
+Do not retry unsafe operations unless duplicate execution is prevented.
+
+---
+
+# 29. Fallbacks
+
+A fallback provides degraded but acceptable behavior.
+
+Examples:
+
+- Cached data
+- Default recommendations
+- Empty recommendation list
+- Temporary unavailable message
+- Read-only experience
+- Delayed processing
+- Limited functionality
+
+## Business-Aware Fallback
+
+```text
+Recommendation service fails
+    --> Display products without recommendations
+```
+
+But:
+
+```text
+Payment service fails
+    --> Never pretend that payment succeeded
+```
+
+Fallbacks must preserve business correctness.
+
+---
+
+# 30. Combined Resilience Flow
+
+```text
+Request
+   |
+   v
+Is Circuit Open?
+   |
+   +--> Yes --> Fallback or Fail Fast
+   |
+   +--> No
+          |
+          v
+       Call with Timeout
+          |
+          +--> Success --> Return Response
+          |
+          +--> Failure
+                  |
+                  v
+             Safe to Retry?
+                  |
+                  +--> Yes --> Retry with Backoff
+                  |
+                  +--> No --> Record Failure
+                                  |
+                                  v
+                      Open Circuit if Threshold Crossed
+                                  |
+                                  v
+                         Fallback or Error Response
+```
+
+## Rules
+
+- Every network request requires a timeout
+- Retries must be limited
+- Retries should use backoff and jitter
+- Retry only safe operations
+- Consider idempotency
+- Protect unstable dependencies with circuit breakers
+- Define fallbacks for optional functionality
+- Monitor circuit-breaker open rates
+- Use graceful degradation where reasonable
+
+---
+
+# 31. Resilience Decision Framework
+
+For every dependency, ask:
+
+1. What happens if it becomes slow?
+2. What happens if it becomes unavailable?
+3. How long should the caller wait?
+4. Should the operation be retried?
+5. How many retries are safe?
+6. Is the operation idempotent?
+7. Can cached data be returned?
+8. Can the feature degrade gracefully?
+9. Is a circuit breaker required?
+10. What error should the user receive?
+11. Which metrics should create alerts?
+12. Is the dependency essential or optional?
+
+Use strict correctness for critical flows such as payments.
+
+Use graceful degradation for optional features such as recommendations and personalization.
+
+---
+
+# 32. Complete Scalability Flow
+
+```text
+Step 1: Traffic increases
+
+Step 2: Find the bottleneck
+        CPU?
+        Memory?
+        Disk?
+        Network?
+        Database?
+        External dependency?
+
+Step 3: Scale vertically if it solves the problem safely
+
+Step 4: Move horizontally when necessary
+
+Step 5: Make application servers stateless
+
+Step 6: Move state to shared systems
+        Redis
+        Database
+        Object storage
+        Queue
+
+Step 7: Place a load balancer in front
+
+Step 8: Add meaningful health checks
+
+Step 9: Choose the correct balancing algorithm
+
+Step 10: Add service discovery
+
+Step 11: Protect dependencies
+         Timeouts
+         Limited retries
+         Backoff
+         Circuit breakers
+         Fallbacks
+
+Step 12: Add centralized monitoring and logging
+
+Step 13: Add autoscaling using meaningful metrics
+```
+
+---
+
+# 33. Trade-Off Summary
+
+## Vertical Scaling
+
+**Best for:** Simplicity and early growth  
+**Risk:** Hardware limits, high cost, and single point of failure
+
+## Horizontal Scaling
+
+**Best for:** Availability, elasticity, and large-scale capacity  
+**Risk:** Distributed-system complexity
+
+## Round Robin
+
+**Best for:** Similar servers and request costs  
+**Risk:** Ignores actual workload
+
+## Weighted Round Robin
+
+**Best for:** Different server capacities and gradual rollouts  
+**Risk:** Uses predefined assumptions
+
+## Least Connections
+
+**Best for:** Long-lived and uneven-duration requests  
+**Risk:** Connection count may not represent actual load
+
+## IP Hash
+
+**Best for:** Simple session affinity  
+**Risk:** Uneven distribution and remapping
+
+## Consistent Hashing
+
+**Best for:** Stable routing and ownership  
+**Risk:** Complexity and balancing challenges
+
+## Stateless Services
+
+**Best for:** Scaling, deployment, and failover  
+**Risk:** State must be externalized correctly
+
+## Service Discovery
+
+**Best for:** Dynamic infrastructure  
+**Risk:** Registry or proxy becomes critical
+
+## Circuit Breakers
+
+**Best for:** Preventing cascade failures  
+**Risk:** Incorrect thresholds may open too early or too late
+
+---
+
+# 34. Bottlenecks and Failure Points
+
+## Common Bottlenecks
+
+- One overloaded application server
+- One overloaded database
+- One overloaded load balancer
+- CPU saturation
+- Memory pressure
+- Slow disk operations
+- Insufficient network bandwidth
+- Local session storage
+- Local file storage
+- Uneven request cost
+- Slow external dependencies
+- Exhausted connection pools
+- Retry storms
+- Service-registry overload
+- Poor autoscaling metrics
+
+## Common Failure Points
+
+- Application server crash
+- Load balancer failure
+- Health-check misconfiguration
+- Stale discovery data
+- Registry outage
+- Bad deployment routed to all users
+- Cache inconsistency
+- IP-hash imbalance
+- Database failure
+- Circuit-breaker threshold too sensitive
+- Circuit-breaker threshold too relaxed
+- Missing fallback
+- Network partition
+
+---
+
+# 35. Red Flags and Anti-Patterns
+
+Avoid:
+
+- [ ] Scaling horizontally while storing sessions locally
+- [ ] Storing uploads only on application-server disk
+- [ ] Running the same scheduled job on every instance
+- [ ] Using one load balancer without redundancy
+- [ ] Treating DNS round robin as a complete load balancer
+- [ ] Treating round robin as actual load awareness
+- [ ] Using sticky sessions to hide poor state design
+- [ ] Hard-coding service IP addresses
+- [ ] Calling dependencies without timeouts
+- [ ] Retrying indefinitely
+- [ ] Retrying without backoff
+- [ ] Retrying unsafe operations without idempotency
+- [ ] Having no fallback for optional services
+- [ ] Ignoring circuit-breaker metrics
+- [ ] Checking only whether the process is alive
+- [ ] Designing for scale but not for failure
+
+---
+
+# 36. Design Review Checklist
+
+Ask:
+
+1. What is the current bottleneck?
+2. Can vertical scaling solve it safely?
+3. Are we introducing horizontal scaling too early?
+4. Is the application stateless?
+5. Where is session data stored?
+6. Where are uploaded files stored?
+7. Can any server handle any request?
+8. What happens if one server fails?
+9. What happens if the load balancer fails?
+10. How are unhealthy servers removed?
+11. Which load-balancing algorithm fits the workload?
+12. Is session affinity necessary?
+13. How do services discover one another?
+14. What happens when instances scale up or down?
+15. Which dependencies can become slow?
+16. Which operations are safe to retry?
+17. Where are circuit breakers required?
+18. What fallback is available?
+19. Are logs centralized?
+20. Are autoscaling metrics meaningful?
+21. Can the system degrade gracefully?
+22. Is the architecture more complex than necessary?
+
+---
+
+# 37. Implementation Checklist
+
+Before calling a service scalable:
+
+- [ ] Multiple instances can run safely
+- [ ] User state is not stored only in local memory
+- [ ] Files are not stored only on local disk
+- [ ] Sessions use tokens or shared storage
+- [ ] A load balancer distributes traffic
+- [ ] Load-balancer redundancy is considered
+- [ ] Health checks exist
+- [ ] Health checks verify readiness
+- [ ] Logs are centralized
+- [ ] Metrics are collected
+- [ ] Alerts are configured
+- [ ] Service discovery works
+- [ ] Dependencies have timeouts
+- [ ] Retries are limited
+- [ ] Retries use backoff
+- [ ] Idempotency is considered
+- [ ] Circuit breakers protect risky dependencies
+- [ ] Fallback behavior is defined
+- [ ] Deployments can be rolled out gradually
+- [ ] One instance can fail safely
+- [ ] Background jobs are coordinated
+- [ ] Autoscaling uses meaningful metrics
+
+---
+
+# 38. Case Study: E-Commerce Festival Sale
+
+## Problem
+
+An e-commerce application currently runs on one server.
+
+During festival sales:
+
+- Traffic increases eight times
+- Pages become slow
+- Checkout times out
+- The team considers buying a very large server
+
+## Questions to Ask
+
+- Is CPU saturated?
+- Is memory exhausted?
+- Is disk I/O slow?
+- Is network bandwidth exhausted?
+- Is the database overloaded?
+- Is payment processing slow?
+- Is inventory checking slow?
+- Are connection pools full?
+- How long does the traffic spike last?
+- Is high availability required?
+
+## Short-Term Solution
+
+Vertical scaling may provide immediate relief when:
+
+- CPU is the bottleneck
+- RAM is insufficient
+- The server can be upgraded safely
+- A stronger machine is affordable
+
+## Long-Term Solution
+
+Use horizontal scaling for:
+
+- Traffic spikes
+- Better availability
+- Fault tolerance
+- Autoscaling
+- Reduced dependence on one server
+
+## Required Changes
+
+- Make application servers stateless
+- Move sessions to Redis
+- Move uploads to object storage
+- Place a load balancer in front
+- Add meaningful health checks
+- Centralize logs
+- Coordinate scheduled jobs
+- Monitor external dependencies
+- Add autoscaling
+
+## Circuit Breaker Placement
+
+Consider circuit breakers around:
+
+- Payment service
+- Inventory service
+- Shipping provider
+- Recommendation service
+- Notification provider
+
+## Recommended Approach
+
+```text
+Immediate:
+    Scale the existing server vertically
+
+Long Term:
+    Scale stateless application servers horizontally
+    Add load balancing
+    Externalize state
+    Add dependency resilience
+```
+
+This is a hybrid scaling strategy.
+
+---
+
+# 39. Case Study: Real-Time Chat
+
+## Problem
+
+A real-time chat application has five servers.
+
+Every user maintains a long-lived connection.
+
+Some servers are overloaded while others remain idle.
+
+## Why Round Robin May Fail
+
+Round robin distributes new connections equally, but connections may remain open for different durations.
+
+```text
+Server A receives users connected for 8 hours
+Server B receives users connected for 5 minutes
+```
+
+Both initially receive equal connection counts, but Server A accumulates more active connections.
+
+## Better Algorithm
+
+Use least connections:
+
+```text
+New connection --> Server with fewest active connections
+```
+
+Advanced designs may also consider:
+
+- CPU usage
+- Memory usage
+- Bandwidth
+- Active connections
+- Regional proximity
+
+## Sticky Sessions
+
+An active WebSocket connection remains attached to one server during its lifetime.
+
+However, critical state should not exist only on that server.
+
+## State to Externalize
+
+- User sessions
+- Authentication state
+- Presence information
+- Message history
+- Undelivered messages
+- Room membership
+- Routing metadata
+
+## Service Discovery
+
+Chat servers should:
+
+1. Register when they start
+2. Report health
+3. Be removed when unhealthy
+4. Be discovered by gateways and other services
+
+## Failure Handling
+
+If one chat server fails:
+
+1. Existing connections disconnect
+2. Clients detect the disconnection
+3. Clients reconnect
+4. The load balancer chooses a healthy instance
+5. Shared state restores user context
+6. Undelivered messages come from shared storage or queues
+
+---
+
+# 40. Practical Scenario Mapping
+
+## E-Commerce Platform
+
+Important patterns:
+
+- Horizontally scaled application servers
+- Shared sessions
+- Object storage
+- Load balancing
+- Payment and inventory protection
+- Circuit breakers
+- Careful retry handling
+
+## Video Streaming Platform
+
+Important patterns:
+
+- Horizontal scaling
+- Regional distribution
+- CDN integration
+- Fault tolerance
+- Bandwidth monitoring
+- Connection-aware routing
+
+## Chat Application
+
+Important patterns:
+
+- WebSockets
+- Least-connections routing
+- Shared presence tracking
+- Reconnection strategy
+- Shared message routing
+- Service discovery
+
+## Ride-Sharing Platform
+
+Services may include:
+
+- Location
+- Matching
+- Pricing
+- Payments
+- Notifications
+- Maps
+
+These services should be able to scale and fail independently.
+
+## Social Media Feed
+
+Important concerns:
+
+- Horizontally scaled application servers
+- Caching
+- Feed generation
+- Celebrity hotspots
+- Consistent hashing
+- Stable cache ownership
+- Failure isolation
+
+---
+
+# 41. Interview Questions and Answers
+
+## What is vertical scaling?
+
+Vertical scaling means increasing the CPU, memory, disk, or network capacity of an existing machine.
+
+## What is horizontal scaling?
+
+Horizontal scaling means adding more machines and distributing the workload across them.
+
+## Why does vertical scaling eventually hit limits?
+
+Hardware has physical limits, high-end machines become expensive, upgrades may require downtime, and one machine remains a failure risk.
+
+## Why does horizontal scaling require stateless services?
+
+Requests may reach different servers. If required state exists only on one server, other servers cannot process those requests correctly.
+
+## What problem does a load balancer solve?
+
+It selects the backend server that handles each request and provides clients with one stable endpoint.
+
+## What is the difference between Layer 4 and Layer 7 load balancing?
+
+Layer 4 routes using transport information such as IP and port. Layer 7 understands application information such as URLs, headers, cookies, and HTTP methods.
+
+## When is round robin suitable?
+
+When backend servers have similar capacity and requests require similar amounts of work.
+
+## Why can round robin fail?
+
+It distributes equal request counts rather than equal amounts of work.
+
+## When should weighted round robin be used?
+
+When servers have different capacities or traffic must be shifted gradually during deployment.
+
+## When should least connections be used?
+
+When connections have different durations, such as WebSockets, streaming, or large uploads.
+
+## What problem does IP hash solve?
+
+It provides session affinity by repeatedly routing the same client IP to the same backend server.
+
+## What problems does IP hash create?
+
+It can create uneven traffic, fail when client IPs change, and remap users when servers are added or removed.
+
+## What does consistent hashing improve?
+
+It minimizes remapping when servers are added or removed.
+
+## What does stateless mean?
+
+A stateless server does not keep required user-specific state locally between requests.
+
+## Does stateless mean no state exists?
+
+No. State exists in tokens, databases, caches, queues, or object storage instead of being owned by one application server.
+
+## What is service discovery?
+
+It is the mechanism through which services find current healthy instances of another service.
+
+## What is a service registry?
+
+It is a directory containing available service instances, addresses, health information, and metadata.
+
+## What is a circuit breaker?
+
+It stops calls to an unhealthy dependency and fails fast after a configured failure condition is reached.
+
+## What is a cascade failure?
+
+A cascade failure occurs when one failed or slow component causes dependent components to exhaust resources and fail.
+
+## Why are timeouts important?
+
+They prevent callers from waiting indefinitely for slow or unavailable dependencies.
+
+## Why can retries be dangerous?
+
+Retries increase traffic to a failing dependency and can amplify an outage.
+
+## What is a fallback?
+
+A fallback is degraded but acceptable behavior returned when the preferred dependency is unavailable.
+
+## Are sticky sessions always wrong?
+
+No. They may be necessary for some legacy or connection-oriented systems, but they reduce flexibility and make failover harder.
+
+## How do you choose a load-balancing algorithm?
+
+Consider:
+
+- Server capacity
+- Request cost
+- Connection duration
+- Session-affinity requirements
+- Live load
+- Membership changes
+- Cache ownership
+
+## When should a database scale vertically before sharding?
+
+When additional CPU, memory, or storage solves the bottleneck safely and the complexity of partitioning is not justified.
+
+---
+
+# 42. Scenario-Based Interview Questions
+
+## Users Keep Getting Logged Out Across Multiple Servers
+
+Possible cause:
+
+```text
+Sessions are stored in local server memory.
+```
+
+Solution:
+
+```text
+Store sessions in Redis or another shared session store.
+```
+
+## Some Servers Are Overloaded Under Round Robin
+
+Possible causes:
+
+- Requests have different costs
+- Connections have different durations
+- Servers have different capacities
+- Some tasks use more CPU or memory
+- Backend dependencies have uneven latency
+
+Possible solutions:
+
+- Weighted round robin
+- Least connections
+- Resource-aware balancing
+- Separate heavy workloads
+- Queue-based processing
+
+## Mobile User Loses Session After Network Change
+
+Possible cause:
+
+```text
+IP-hash-based affinity
+```
+
+The IP changes when moving between Wi-Fi and mobile data.
+
+Better design:
+
+- Token-based authentication
+- Shared session storage
+- No dependency on client IP for correctness
+
+## Payment Provider Becomes Slow
+
+Protection strategy:
+
+1. Configure a timeout
+2. Limit retries
+3. Retry only safe operations
+4. Use backoff and jitter
+5. Add a circuit breaker
+6. Protect connection pools
+7. Return a truthful status
+8. Alert the operations team
+
+## Health Check Is Green but Users See Errors
+
+Check whether the endpoint verifies:
+
+- Application readiness
+- Required resources
+- Connection-pool health
+- Database connectivity
+- Required configuration
+- Ability to serve real traffic
+
+## New Release Fails for Some Traffic
+
+Use weighted routing or a canary release:
+
+```text
+New Version --> Small percentage
+Old Version --> Remaining traffic
+```
+
+Monitor:
+
+- Error rates
+- Latency
+- Resource usage
+- Business failures
+
+Route traffic back to the stable version if problems increase.
+
+---
+
+# 43. Myths vs Reality
+
+## Myth: Bigger servers are always bad
+
+**Reality:** Vertical scaling is often the simplest solution during early growth.
+
+## Myth: Horizontal scaling is only adding servers
+
+**Reality:** It also requires statelessness, routing, shared storage, discovery, monitoring, and resilience.
+
+## Myth: Round robin gives equal load
+
+**Reality:** It gives an equal request count, not equal resource usage.
+
+## Myth: Sticky sessions cleanly solve session problems
+
+**Reality:** They often hide poor state design and make failover harder.
+
+## Myth: Service discovery is only for microservices
+
+**Reality:** It is useful whenever multiple dynamic instances exist.
+
+## Myth: Retries always improve reliability
+
+**Reality:** Uncontrolled retries can increase load and worsen an outage.
+
+## Myth: Circuit breakers are only for external APIs
+
+**Reality:** They can protect internal services, databases, caches, and external dependencies.
+
+## Myth: Multiple servers automatically provide availability
+
+**Reality:** Availability also requires traffic routing, health checks, failover, and shared state.
+
+---
+
+# 44. Quick Revision
+
+## Vertical Scaling
+
+```text
+Add more power to one machine.
+```
+
+- Simple
+- Useful early
+- Minimal architectural changes
+- Limited by hardware
+- May remain a single point of failure
+
+## Horizontal Scaling
+
+```text
+Add more machines.
+```
+
+- Better availability
+- Better fault tolerance
+- Supports autoscaling
+- Requires distributed-system design
+- Requires stateless services
+
+## Load Balancer
+
+```text
+Distributes traffic across backend servers.
+```
+
+- Provides a stable endpoint
+- Performs health checks
+- Removes unhealthy servers
+- Supports failover
+- Supports safer deployments
+
+## Layer 4
+
+```text
+Routes using IP, port, TCP, and UDP information.
+```
+
+## Layer 7
+
+```text
+Routes using URLs, methods, headers, cookies, and HTTP information.
+```
+
+## Round Robin
+
+```text
+Requests move through servers in sequence.
+```
+
+## Weighted Round Robin
+
+```text
+Higher-capacity servers receive more traffic.
+```
+
+## Least Connections
+
+```text
+New request goes to the server with the fewest active connections.
+```
+
+## IP Hash
+
+```text
+Client IP determines the backend server.
+```
+
+## Consistent Hashing
+
+```text
+Minimizes remapping when servers are added or removed.
+```
+
+## Stateless Service
+
+```text
+Required user state is not stored locally between requests.
+```
+
+## Service Discovery
+
+```text
+Finds current healthy service instances.
+```
+
+## Circuit Breaker
+
+```text
+Stops calls to unhealthy dependencies and fails fast.
+```
+
+## Circuit Breaker States
+
+```text
+Closed    --> Calls flow normally
+Open      --> Calls fail fast
+Half-Open --> Limited test calls are allowed
+```
+
+## Resilience Combination
+
+```text
+Timeout
++ Limited Retry
++ Backoff
++ Circuit Breaker
++ Fallback
++ Monitoring
+= Better Resilience
+```
+
+---
+
+# 45. Top 10 Points
+
+1. Vertical scaling is simple but limited.
+2. Horizontal scaling is powerful but introduces distributed complexity.
+3. Stateless services are the foundation of clean horizontal scaling.
+4. Load balancers distribute traffic across backend servers.
+5. Health checks enable automatic failover.
+6. Round robin works best when servers and requests are similar.
+7. Weighted round robin handles capacity differences and gradual rollouts.
+8. Least connections works well for long-lived or uneven connections.
+9. Service discovery is necessary when service instances change dynamically.
+10. Circuit breakers prevent dependency failures from creating cascade failures.
+
+---
+
+# 46. Final Mental Model
+
+```text
+Vertical Scaling
+    |
+    | Solves early capacity problems
+    v
+Horizontal Scaling
+    |
+    | Requires multiple replaceable instances
+    v
+Stateless Services
+    |
+    | Allow any server to handle any request
+    v
+Load Balancer
+    |
+    | Distributes requests and removes failed instances
+    v
+Service Discovery
+    |
+    | Finds dynamic healthy instances
+    v
+Circuit Breakers
+    |
+    | Prevent dependency failures from spreading
+    v
+Scalable and Resilient System
+```
+
+> The architect's job is not to select the most advanced technology. The architect's job is to select the simplest architecture that satisfies scale, availability, reliability, cost, and operational requirements.
