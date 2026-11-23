@@ -1,0 +1,2261 @@
+# URL Shortener System Design
+
+## 1. Problem Statement
+
+Design a URL shortener similar to Bitly or TinyURL.
+
+The system converts a long URL:
+
+> https://example.com/products/category/item?id=12345
+
+into a short URL:
+
+> https://short.url/abc123
+
+When a user visits the short URL, the system redirects them to the original long URL.
+
+---
+
+## 2. Why Is This a System Design Problem?
+
+A URL shortener looks simple because it appears to store only:
+
+- A short code
+- A long URL
+
+However, at scale, it must handle:
+
+- Billions of stored URLs
+- Millions of redirects
+- Very low redirect latency
+- Unique short-code generation
+- Custom aliases
+- Link expiration
+- Click analytics
+- Viral links
+- Malicious URLs
+- Global users
+- High availability
+- Infrastructure cost
+
+A URL may be created once but clicked millions of times.
+
+Therefore, a URL shortener is a heavily **read-dominated system**.
+
+---
+
+## 3. Main Workloads
+
+The system has three main workloads.
+
+### 3.1 URL Creation
+
+The user submits a long URL, and the system:
+
+1. Validates the URL.
+2. Checks the user's quota.
+3. Generates a unique ID.
+4. Converts the ID to Base62.
+5. Stores the URL mapping.
+6. Returns the short URL.
+
+### 3.2 URL Redirection
+
+When someone visits a short URL, the system:
+
+1. Extracts the short code.
+2. Looks for the code in the cache.
+3. Reads the database if the cache misses.
+4. Checks whether the link is active and unexpired.
+5. Returns a redirect response.
+6. Publishes an analytics event asynchronously.
+
+### 3.3 Analytics Processing
+
+The analytics system:
+
+1. Receives click events.
+2. Enriches them with country, device and referrer information.
+3. Aggregates the events.
+4. Stores the results.
+5. Makes the results available through an analytics API.
+
+---
+
+## 4. Functional Requirements
+
+The system should allow users to:
+
+- Submit a long URL and receive a short URL.
+- Visit a short URL and get redirected.
+- Request a custom alias.
+- Set an expiration date.
+- Deactivate or delete a short URL.
+- View click analytics.
+- View clicks by country.
+- View clicks by device.
+- View clicks by time.
+- View referrer information.
+- Use anonymous access.
+- Use authenticated access.
+- Create URLs in bulk.
+- Report abusive links.
+
+---
+
+## 5. Non-Functional Requirements
+
+The system should provide:
+
+- Redirect latency under 100 milliseconds.
+- At least 99.9% availability.
+- Horizontal scalability.
+- Support for billions of URL mappings.
+- High redirect throughput.
+- Global low-latency access.
+- Unique short-code generation.
+- Compact short codes.
+- Fault tolerance.
+- Abuse prevention.
+- DDoS protection.
+- Asynchronous analytics.
+- Cost-efficient storage.
+- Graceful degradation during traffic spikes.
+
+---
+
+## 6. Core Design Principle
+
+The redirect path is the most important path.
+
+The system should optimize:
+
+> short code → long URL → redirect response
+
+The redirect path should avoid:
+
+- Heavy database queries
+- Synchronous analytics processing
+- Multiple network calls
+- Synchronous click-count updates
+- Complex business logic
+
+The redirect should remain fast even if:
+
+- Analytics is delayed
+- The creation service is unavailable
+- The dashboard is unavailable
+- Some enrichment services fail
+
+---
+
+## 7. Example Traffic Estimation
+
+Assume:
+
+- 10 million URLs are created every day.
+- The read-to-write ratio is 100:1.
+- Each URL mapping uses approximately 1 KB.
+- Peak traffic is five times average traffic.
+
+### Write requests per second
+
+10,000,000 / 86,400 ≈ 116 writes per second
+
+### Read requests per second
+
+116 × 100 ≈ 11,600 redirects per second
+
+### Peak redirect traffic
+
+11,600 × 5 ≈ 58,000 redirects per second
+
+### Storage per year
+
+10,000,000 × 365 × 1 KB ≈ 3.65 TB per year
+
+These estimates help determine:
+
+- Database capacity
+- Cache size
+- Network bandwidth
+- Number of application servers
+- Analytics pipeline capacity
+
+---
+
+## 8. API Design
+
+### 8.1 Create Short URL
+
+Endpoint:
+
+> POST /api/v1/shorten
+
+Request body:
+
+~~~json
+{
+  "long_url": "https://example.com/products/123",
+  "custom_alias": "summer-sale",
+  "expires_at": "2027-01-01T00:00:00Z"
+}
+~~~
+
+Successful response:
+
+> 201 Created
+
+~~~json
+{
+  "short_code": "summer-sale",
+  "short_url": "https://short.url/summer-sale",
+  "long_url": "https://example.com/products/123",
+  "created_at": "2026-11-23T10:00:00Z",
+  "expires_at": "2027-01-01T00:00:00Z"
+}
+~~~
+
+A new short code can be created for every request, even when the long URL was shortened before.
+
+This supports separate analytics for:
+
+- Different users
+- Different campaigns
+- Different platforms
+- Different expiration settings
+
+---
+
+### 8.2 Redirect Short URL
+
+Endpoint:
+
+> GET /{shortCode}
+
+Example:
+
+> GET /abc123
+
+Successful response:
+
+~~~http
+HTTP/1.1 302 Found
+Location: https://example.com/products/123
+~~~
+
+Possible failures:
+
+- `404 Not Found`: Code does not exist, has expired or is inactive.
+- `403 Forbidden`: Destination was blocked.
+- `429 Too Many Requests`: Rate limit exceeded.
+- `500 Internal Server Error`: Unexpected server failure.
+
+---
+
+### 8.3 Get Analytics
+
+Endpoint:
+
+> GET /api/v1/stats/{shortCode}
+
+Example response:
+
+~~~json
+{
+  "short_code": "abc123",
+  "total_clicks": 15240,
+  "unique_clicks": 10320,
+  "countries": {
+    "IN": 8000,
+    "US": 4200
+  },
+  "devices": {
+    "mobile": 9800,
+    "desktop": 5440
+  },
+  "top_referrers": [
+    "linkedin.com",
+    "google.com"
+  ]
+}
+~~~
+
+The analytics API should read aggregated information instead of scanning all raw click events.
+
+---
+
+### 8.4 Bulk URL Creation
+
+Endpoint:
+
+> POST /api/v1/shorten/bulk
+
+This endpoint is useful for:
+
+- Marketing campaigns
+- Enterprise customers
+- Data imports
+- Large URL collections
+
+It should support:
+
+- Authentication
+- Batch-size limits
+- Premium quotas
+- Idempotency
+- Asynchronous processing for very large batches
+
+---
+
+## 9. API Error Handling
+
+| HTTP status | Meaning |
+|---|---|
+| `400 Bad Request` | Invalid URL, alias or expiration value |
+| `401 Unauthorized` | Authentication is required |
+| `403 Forbidden` | Unsafe, blocked or unauthorized destination |
+| `404 Not Found` | Short code is missing, expired or inactive |
+| `409 Conflict` | Custom alias already exists |
+| `429 Too Many Requests` | Rate limit or quota exceeded |
+| `500 Internal Server Error` | Unexpected server failure |
+| `503 Service Unavailable` | Required component is temporarily unavailable |
+
+Errors should help API consumers understand the problem without exposing sensitive internal details.
+
+---
+
+## 10. HTTP 301 vs 302 Redirect
+
+### 10.1 301 Permanent Redirect
+
+Advantages:
+
+- Browsers may cache the redirect.
+- Repeat visits may not reach the shortener.
+- Origin traffic is reduced.
+- Repeat redirects may be faster.
+
+Disadvantages:
+
+- Repeat clicks may bypass analytics.
+- Analytics becomes incomplete.
+- Changing the destination becomes difficult.
+- Disabling a malicious link may not take effect immediately.
+
+### 10.2 302 Temporary Redirect
+
+Advantages:
+
+- Clicks continue passing through the shortener.
+- Analytics remains more accurate.
+- The destination can be updated.
+- Expiration can be enforced.
+- Malicious URLs can be disabled.
+
+Disadvantages:
+
+- More requests reach the URL shortener.
+- Infrastructure load is higher.
+
+### Decision
+
+Use `302` when analytics, expiration and destination control are important.
+
+Use `301` only when the destination is permanent and complete analytics is not required.
+
+---
+
+## 11. High-Level Architecture
+
+~~~text
+Clients
+   |
+   v
+CDN / Edge / WAF
+   |
+   v
+Global Traffic Manager
+   |
+   v
+Load Balancer
+   |
+   +-------------------------+
+   |                         |
+   v                         v
+Redirect Service      Shortening Service
+   |                         |
+   v                         v
+Local Cache             Rate Limiter
+   |                         |
+   v                         v
+Redis Cache              URL Validator
+   |                         |
+   v                         v
+NoSQL URL Store         ID Generator
+                             |
+                             v
+                       Base62 Encoder
+                             |
+                             v
+                       URL Mapping Store
+~~~
+
+Analytics architecture:
+
+~~~text
+Redirect Service
+      |
+      v
+Click Event
+      |
+      v
+Kafka / Kinesis / Event Hubs
+      |
+      v
+Stream Processors
+      |
+      v
+Aggregated Analytics Store
+      |
+      v
+Data Warehouse
+      |
+      v
+Analytics API
+~~~
+
+---
+
+## 12. Separation of Workloads
+
+### Redirect path
+
+Optimized for:
+
+- Low latency
+- High availability
+- High throughput
+- Cache efficiency
+
+### Creation path
+
+Optimized for:
+
+- Strong uniqueness
+- URL validation
+- Alias conflict handling
+- Rate limiting
+- Abuse prevention
+
+### Analytics path
+
+Optimized for:
+
+- Event ingestion
+- High write throughput
+- Eventual consistency
+- Aggregations
+- Analytical queries
+
+### User and billing path
+
+Optimized for:
+
+- Relationships
+- Transactions
+- Subscriptions
+- Quotas
+- User dashboards
+
+These paths should scale independently.
+
+---
+
+## 13. SQL vs NoSQL
+
+### SQL Advantages
+
+- ACID transactions
+- Strong uniqueness constraints
+- Joins and relationships
+- Familiar query model
+- Good for users, plans and billing
+
+Examples:
+
+- PostgreSQL
+- MySQL
+- Azure SQL
+- Amazon Aurora
+
+### SQL Disadvantages
+
+- Horizontal scaling requires more planning.
+- Sharding can become complicated.
+- It may be unnecessary for simple key-value lookups.
+
+### NoSQL Advantages
+
+- Efficient key-value lookup
+- Horizontal scalability
+- High read and write throughput
+- Built-in data distribution
+- Good fit for billions of URL mappings
+
+Examples:
+
+- Amazon DynamoDB
+- Azure Cosmos DB
+- Apache Cassandra
+- Google Cloud Bigtable
+
+### NoSQL Disadvantages
+
+- Complex analytics queries are harder.
+- Global uniqueness requires careful design.
+- A separate analytics system is usually needed.
+
+### Recommended Split
+
+| Data | Recommended storage |
+|---|---|
+| URL mappings | NoSQL or distributed key-value database |
+| Users and billing | SQL database |
+| Raw click events | Event stream or data lake |
+| Aggregated analytics | Analytics store or warehouse |
+
+For approximately 10 million URLs, PostgreSQL may be enough initially.
+
+For billions of URLs and extremely high redirect traffic, a distributed key-value database is a better fit.
+
+---
+
+## 14. Main URL Mapping Schema
+
+Primary access pattern:
+
+> Find the long URL using the short code.
+
+Logical schema:
+
+~~~text
+URLMapping
+----------
+short_code
+long_url
+user_id
+created_at
+expires_at
+is_custom
+is_active
+status
+metadata
+~~~
+
+Primary key:
+
+> short_code
+
+Example record:
+
+~~~json
+{
+  "short_code": "abc123",
+  "long_url": "https://example.com/products/123",
+  "user_id": "user-1001",
+  "created_at": "2026-11-23T10:00:00Z",
+  "expires_at": "2027-11-23T10:00:00Z",
+  "is_custom": false,
+  "is_active": true,
+  "status": "ACTIVE"
+}
+~~~
+
+Do not update this record on every click.
+
+A popular link could create:
+
+- Write contention
+- Hot partitions
+- Increased redirect latency
+- Database write pressure
+
+Click events should be processed separately.
+
+---
+
+## 15. Indexing Strategy
+
+### URL Mapping Store
+
+Recommended indexes:
+
+- Primary index on `short_code`
+- Secondary index on `user_id + created_at`
+- Optional index on `expires_at`
+
+Purpose:
+
+- `short_code` supports redirect lookup.
+- `user_id + created_at` supports listing a user's URLs.
+- `expires_at` supports cleanup and archival.
+
+### Analytics Store
+
+Possible indexes or partition keys:
+
+- `short_code + clicked_at`
+- `user_id + clicked_at`
+- `country + clicked_at`
+- `device_type + clicked_at`
+
+Avoid unnecessary indexes because they:
+
+- Consume storage
+- Increase write cost
+- Increase maintenance work
+
+---
+
+## 16. Short-Code Generation Requirements
+
+A short-code generation strategy should provide:
+
+- Uniqueness
+- Compact codes
+- High throughput
+- Low latency
+- Horizontal scalability
+- Collision prevention
+- Custom alias compatibility
+
+Common strategies:
+
+1. Hashing
+2. Counter with Base62
+3. Distributed ID generation
+4. Pre-generated code pool
+5. Random code generation
+
+---
+
+## 17. Hashing Strategy
+
+Process:
+
+~~~text
+Long URL
+   |
+   v
+Hash Function
+   |
+   v
+Truncate Hash
+   |
+   v
+Short Code
+~~~
+
+Example:
+
+> SHA-256(long URL) → first seven characters
+
+### Problem
+
+The complete hash is too long.
+
+When the hash is truncated, different URLs may produce the same shortened value.
+
+This is called a collision.
+
+### Collision Solutions
+
+- Use additional hash characters.
+- Check the database before insertion.
+- Add a random salt and retry.
+- Append additional characters.
+- Use a separate unique ID.
+
+### Limitation
+
+Hashing the same URL may produce the same short code.
+
+That may be undesirable when separate campaign analytics are required.
+
+### Conclusion
+
+Hashing is possible, but pure truncated hashing is not the cleanest option when guaranteed uniqueness is required.
+
+---
+
+## 18. Counter and Base62 Strategy
+
+Process:
+
+1. Obtain a unique numeric ID.
+2. Convert the ID to Base62.
+3. Use the Base62 value as the short code.
+4. Store the mapping.
+
+Example:
+
+~~~text
+Numeric ID: 125
+Base62 value: 21
+Short URL: https://short.url/21
+~~~
+
+### Base62 Characters
+
+Base62 uses:
+
+- `0-9`: 10 characters
+- `A-Z`: 26 characters
+- `a-z`: 26 characters
+
+Total:
+
+> 10 + 26 + 26 = 62 characters
+
+### Capacity
+
+Seven Base62 characters provide:
+
+> 62^7 ≈ 3.5 trillion combinations
+
+### Advantages
+
+- Collision-free if numeric IDs are unique
+- Compact result
+- Easy to understand
+- Easy to implement
+- Fast encoding
+
+### Challenges
+
+- A global counter can become a bottleneck.
+- Sequential codes may be predictable.
+- The central counter may become a single point of failure.
+- Generated codes may conflict with custom aliases.
+
+---
+
+## 19. Scaling the Counter
+
+### 19.1 Range Allocation
+
+Each creation server receives a unique range.
+
+~~~text
+Server A: 1 to 1,000,000
+Server B: 1,000,001 to 2,000,000
+Server C: 2,000,001 to 3,000,000
+~~~
+
+Advantages:
+
+- Servers do not request the next ID for every URL.
+- Creation latency is reduced.
+- The ID service receives fewer calls.
+- Servers can generate IDs independently.
+
+Trade-off:
+
+- Some IDs may be unused when a server crashes.
+
+Unused IDs are normally acceptable because the namespace is very large.
+
+---
+
+### 19.2 Distributed ID Generation
+
+A Snowflake-style ID can combine:
+
+~~~text
+Timestamp + Region ID + Machine ID + Sequence Number
+~~~
+
+Conceptual structure:
+
+~~~text
+| timestamp | region ID | machine ID | sequence |
+~~~
+
+Why it works:
+
+- Timestamp changes as time moves forward.
+- Machine ID prevents conflicts between servers.
+- Sequence number supports multiple IDs in the same millisecond.
+
+Advantages:
+
+- High throughput
+- No central counter bottleneck
+- Globally unique IDs
+- Rough time ordering
+
+Challenges:
+
+- Clock synchronization
+- Clock moving backward
+- Machine ID management
+- Region ID management
+- Larger numeric IDs
+
+The resulting numeric ID is encoded using Base62.
+
+---
+
+### 19.3 Pre-Generated Code Pool
+
+A background service generates unique codes in advance.
+
+Creation servers reserve unused codes from the pool.
+
+Advantages:
+
+- Very fast URL creation
+- Codes can be verified before use
+- Creation servers need less generation logic
+
+Disadvantages:
+
+- More operational complexity
+- Pool refill management
+- Handling reserved but unused codes
+- Code-pool availability becomes important
+
+---
+
+## 20. Predictable Short Codes
+
+Sequential numeric IDs encoded directly in Base62 may be predictable.
+
+An attacker may try:
+
+~~~text
+abc100
+abc101
+abc102
+abc103
+~~~
+
+Possible solutions:
+
+- Apply a reversible permutation.
+- XOR the numeric ID with a secret.
+- Use Hashids-style obfuscation.
+- Use a Feistel-network-based permutation.
+- Generate random codes and check uniqueness.
+
+Important:
+
+Obfuscation is not authentication.
+
+A private URL should require proper authorization instead of relying only on an unguessable short code.
+
+---
+
+## 21. Custom Alias Handling
+
+Example custom alias:
+
+> https://short.url/summer-sale
+
+Validation rules:
+
+- Allow only approved characters.
+- Enforce minimum length.
+- Enforce maximum length.
+- Reject reserved words.
+- Reject offensive aliases if required.
+- Enforce uniqueness.
+- Apply user-plan restrictions.
+
+Reserved aliases may include:
+
+- `api`
+- `admin`
+- `login`
+- `support`
+- `help`
+- `billing`
+- `health`
+- `metrics`
+- `static`
+
+### Conflict Handling
+
+If the alias already exists:
+
+> Return `409 Conflict`.
+
+### Race Condition
+
+Suppose two users request `summer-sale` simultaneously.
+
+An unsafe implementation:
+
+~~~text
+1. Check whether alias exists.
+2. Alias appears available.
+3. Insert alias.
+~~~
+
+Both requests may see that the alias is available.
+
+Use:
+
+- An atomic conditional insert
+- A unique database constraint
+- A transaction
+
+Exactly one request succeeds.
+
+The other receives `409 Conflict`.
+
+Generated codes and custom aliases must use the same protected namespace or clearly separate namespaces.
+
+---
+
+## 22. Redirect Request Flow
+
+1. User visits the short URL.
+2. CDN checks its cache.
+3. If the CDN misses, the request reaches the load balancer.
+4. The redirect service checks its local cache.
+5. If local cache misses, it checks Redis.
+6. If Redis misses, it reads the database.
+7. It verifies that the mapping is active.
+8. It verifies that the mapping has not expired.
+9. It stores the mapping in the cache.
+10. It returns a `302` redirect.
+11. It publishes an analytics event asynchronously.
+
+Important rule:
+
+> The redirect must not wait for analytics processing.
+
+---
+
+## 23. Cache-Aside Pattern
+
+Pseudo-code:
+
+~~~text
+function redirect(shortCode):
+
+    mapping = cache.get(shortCode)
+
+    if mapping is null:
+
+        mapping = database.get(shortCode)
+
+        if mapping is null:
+            cache.put(shortCode, NOT_FOUND, shortTTL)
+            return 404
+
+        cache.put(shortCode, mapping, normalTTL)
+
+    if mapping.isActive is false:
+        return 404
+
+    if mapping.expiresAt <= currentTime:
+        return 404
+
+    publishClickEventAsync(shortCode)
+
+    return 302 mapping.longUrl
+~~~
+
+### Benefits
+
+- Database load is reduced.
+- Popular URLs remain in memory.
+- Redirect latency is improved.
+- Application servers can remain stateless.
+
+---
+
+## 24. Negative Caching
+
+Attackers may request many invalid short codes.
+
+Without negative caching:
+
+~~~text
+Invalid code → Redis miss → Database lookup → 404
+~~~
+
+Every invalid request reaches the database.
+
+With negative caching:
+
+~~~text
+missing:abc123 → NOT_FOUND
+~~~
+
+The system temporarily caches missing codes.
+
+Use a short TTL because:
+
+- A code may be created later.
+- A long negative TTL could produce an incorrect `404`.
+
+---
+
+## 25. Multi-Level Caching
+
+A production system may use:
+
+~~~text
+L1: Local in-memory cache
+L2: Redis or Memcached
+L3: CDN or edge cache
+L4: NoSQL database
+~~~
+
+### Local Cache
+
+Advantages:
+
+- Extremely low latency
+- No network call
+- Helpful during Redis problems
+
+Disadvantages:
+
+- Cache differs between instances.
+- Memory is limited.
+- Invalidation is more complex.
+
+### Redis Cache
+
+Advantages:
+
+- Shared cache
+- Low lookup latency
+- TTL support
+- Replication and failover support
+
+Disadvantages:
+
+- Requires a network call.
+- Can develop hot keys.
+- Cache cluster failures must be handled.
+
+### CDN Cache
+
+Advantages:
+
+- Serves users near their location.
+- Reduces origin traffic.
+- Handles viral traffic.
+- Improves global latency.
+
+Disadvantages:
+
+- Cached redirects can affect analytics.
+- Expired links need invalidation.
+- CDN traffic creates cost.
+
+---
+
+## 26. Cache Expiration and Invalidation
+
+The cache TTL should not exceed the remaining life of the URL.
+
+Formula:
+
+~~~text
+cacheTTL = minimum(defaultTTL, expiresAt - currentTime)
+~~~
+
+When a link is:
+
+- Updated
+- Disabled
+- Deleted
+- Expired
+- Marked malicious
+
+invalidate:
+
+- CDN cache
+- Redis cache
+- Local application cache
+
+Possible methods:
+
+- CDN purge API
+- Cache versioning
+- Pub/sub invalidation
+- Short TTLs
+- Event-driven invalidation
+
+---
+
+## 27. Cache Stampede
+
+A cache stampede occurs when:
+
+1. A popular cache entry expires.
+2. Many requests arrive simultaneously.
+3. Every request misses the cache.
+4. Every request queries the database.
+5. The database becomes overloaded.
+
+Solutions:
+
+- TTL jitter
+- Request coalescing
+- Distributed lock
+- Stale-while-revalidate
+- Background refresh
+- Longer TTL for popular URLs
+
+Example TTL jitter:
+
+~~~text
+TTL = 60 minutes + random value between 0 and 10 minutes
+~~~
+
+This prevents many keys from expiring at exactly the same time.
+
+---
+
+## 28. Hot Keys and Viral Links
+
+A hot key is one short code receiving much more traffic than other codes.
+
+Example:
+
+> A celebrity shares one short link that receives millions of clicks.
+
+Problems:
+
+- One Redis key is heavily accessed.
+- One database partition may be overloaded.
+- Origin traffic increases.
+- Analytics volume spikes.
+- Cache nodes may become bottlenecks.
+
+Solutions:
+
+- CDN caching
+- Local in-memory caching
+- Hot-key replication
+- Cache pre-warming
+- Request coalescing
+- Autoscaling
+- Asynchronous analytics
+- Analytics sampling during emergencies
+- Rate limiting
+- DDoS protection
+
+The best viral redirect request is one served by the CDN without reaching the origin.
+
+---
+
+## 29. Analytics Pipeline
+
+Heavy analytics should not run during a redirect.
+
+Recommended flow:
+
+~~~text
+Redirect Service
+      |
+      v
+Minimal Click Event
+      |
+      v
+Kafka / Kinesis / Event Hubs
+      |
+      v
+Stream Processor
+      |
+      v
+Event Enrichment
+      |
+      v
+Aggregated Analytics Store
+      |
+      v
+Data Warehouse
+      |
+      v
+Analytics API
+~~~
+
+Minimal click event:
+
+~~~json
+{
+  "event_id": "evt-123",
+  "short_code": "abc123",
+  "clicked_at": "2026-11-23T10:00:00Z",
+  "ip_address": "masked-or-hashed-value",
+  "user_agent": "Mozilla/5.0",
+  "referrer": "https://linkedin.com"
+}
+~~~
+
+Stream processors can add:
+
+- Country
+- City
+- Device type
+- Browser
+- Operating system
+- Referrer category
+- Bot classification
+
+Benefits:
+
+- Redirect remains fast.
+- Analytics scales independently.
+- Failed processing can be retried.
+- Reports do not overload the mapping database.
+
+---
+
+## 30. Analytics Consistency
+
+Analytics can be eventually consistent.
+
+Example:
+
+~~~text
+User clicks the link now.
+Redirect happens immediately.
+Dashboard updates after a few seconds or minutes.
+~~~
+
+This is acceptable because:
+
+- Redirect correctness is critical.
+- Real-time reporting is less critical.
+- Delayed processing improves availability.
+- Workers can process events in batches.
+
+The dashboard should show its most recent processing time.
+
+---
+
+## 31. Analytics Data Model
+
+### Raw Click Event
+
+~~~text
+ClickEvent
+----------
+event_id
+short_code
+clicked_at
+ip_hash
+user_agent
+referrer
+country
+city
+device_type
+browser
+is_bot
+~~~
+
+### Daily Analytics
+
+~~~text
+DailyAnalytics
+--------------
+short_code
+date
+total_clicks
+unique_clicks
+mobile_clicks
+desktop_clicks
+country_counts
+referrer_counts
+~~~
+
+### Example Retention Strategy
+
+- Raw click events: 30 days
+- Hourly aggregations: 90 days
+- Daily aggregations: several years
+- Historical raw events: cold object storage
+
+Do not store every raw click forever unless required by business, compliance or auditing needs.
+
+---
+
+## 32. Rate Limiting
+
+Rate limiting protects against:
+
+- Bot traffic
+- URL creation spam
+- Namespace exhaustion
+- Malicious campaigns
+- Unexpected infrastructure cost
+- API abuse
+
+Example quotas:
+
+| User type | Limit |
+|---|---|
+| Anonymous | 10 shortenings per hour per IP |
+| Registered | 100 shortenings per hour |
+| Premium | 10,000 shortenings per hour |
+
+Possible algorithms:
+
+- Token bucket
+- Leaky bucket
+- Fixed window
+- Sliding window log
+- Sliding window counter
+
+Rate-limit using:
+
+- IP address
+- User ID
+- API key
+- Account
+- Destination domain
+
+Response:
+
+~~~http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 3600
+~~~
+
+A distributed rate limiter may use Redis atomic operations or scripts.
+
+---
+
+## 33. Security and Abuse Prevention
+
+URL shorteners can hide malicious destinations.
+
+Security controls:
+
+- Allow only HTTP and HTTPS.
+- Validate URL syntax.
+- Block known phishing domains.
+- Block known malware domains.
+- Monitor suspicious creation patterns.
+- Rate-limit URL creation.
+- Scan suspicious URLs asynchronously.
+- Support abuse reporting.
+- Disable malicious URLs quickly.
+- Restrict reserved aliases.
+- Use WAF protection.
+- Use DDoS protection.
+- Record administrative actions.
+
+### SSRF Protection
+
+If the system fetches destination URLs for scanning or previews, block:
+
+- `localhost`
+- Loopback IP addresses
+- Private IP address ranges
+- Link-local addresses
+- Cloud metadata endpoints
+- Internal DNS names
+
+Validation should also check:
+
+- DNS resolution
+- Redirect chains
+- Destination changes
+- IPv4 and IPv6 forms
+
+---
+
+## 34. Expiry, Soft Delete and Archival
+
+### Expiry
+
+A link is expired when:
+
+~~~text
+currentTime >= expiresAt
+~~~
+
+Expired links may return:
+
+- `404 Not Found`
+- `410 Gone`
+
+The product team should choose one consistent behavior.
+
+### Soft Delete
+
+Instead of deleting the mapping immediately:
+
+~~~text
+is_active = false
+status = DELETED
+~~~
+
+Advantages:
+
+- Recovery is possible.
+- Historical analytics are preserved.
+- Customer support investigations are easier.
+- Audit requirements can be supported.
+
+Disadvantage:
+
+- Storage continues increasing.
+
+### Archival
+
+Example:
+
+~~~text
+Active links → Main database
+Old inactive links → Archive storage
+Recent analytics → Analytics database
+Historical analytics → Data warehouse or object storage
+~~~
+
+---
+
+## 35. Global Distribution
+
+For global users, use:
+
+- CDN and edge caching
+- Global traffic routing
+- Regional redirect services
+- Regional Redis clusters
+- Replicated URL mappings
+- Nearest-region routing
+
+### Global Read Strategy
+
+~~~text
+User
+  |
+  v
+Nearest Edge Location
+  |
+  v
+Nearest Healthy Region
+  |
+  v
+Regional Cache
+  |
+  v
+Replicated URL Store
+~~~
+
+Reads are easier to distribute than writes.
+
+### Single Primary Write Region
+
+Advantages:
+
+- Simpler uniqueness
+- Easier alias conflict handling
+- Clear source of truth
+
+Disadvantages:
+
+- Higher creation latency for distant users
+- Dependency on the primary region
+
+### Multi-Region Writes
+
+Advantages:
+
+- Lower regional write latency
+- Better regional resilience
+
+Disadvantages:
+
+- Alias conflicts
+- Global uniqueness complexity
+- Replication conflicts
+- Greater operational complexity
+
+### Practical Decision
+
+Use:
+
+- Global reads
+- A primary write region
+- Distributed ID generation
+- Strong coordination for custom aliases
+
+Move to multi-region writes only when the requirement justifies the additional complexity.
+
+---
+
+## 36. Failure Handling
+
+### Redis Is Unavailable
+
+Redirects should not completely stop.
+
+Fallback path:
+
+~~~text
+Redis unavailable
+   |
+   v
+Local cache
+   |
+   v
+Database
+   |
+   v
+Redirect response
+~~~
+
+Required protections:
+
+- Circuit breaker
+- Database rate protection
+- Local cache
+- Load shedding
+- Redis replicas
+- Automatic failover
+
+The database may not handle all redirect traffic, making CDN and local caching important.
+
+---
+
+### ID Generator Is Unavailable
+
+Existing redirects should continue.
+
+New URL creation may:
+
+- Return `503 Service Unavailable`
+- Use an alternate generator
+- Use already allocated ID ranges
+- Consume a pre-generated code pool
+
+The creation path should fail independently from the redirect path.
+
+---
+
+### Analytics Stream Is Unavailable
+
+Redirects should continue.
+
+Possible actions:
+
+- Buffer events temporarily.
+- Write minimal access logs.
+- Retry event publishing.
+- Send failures to a dead-letter queue.
+- Sample low-priority analytics.
+- Drop non-critical enrichment data during overload.
+
+Analytics must not be a hard dependency of the redirect path.
+
+---
+
+### Database Region Failure
+
+Possible protections:
+
+- Cross-region replication
+- Automated failover
+- Multi-region reads
+- Regular backups
+- Point-in-time recovery
+- Tested disaster-recovery procedures
+
+The system should define:
+
+- Recovery Time Objective
+- Recovery Point Objective
+
+---
+
+## 37. Graceful Degradation
+
+During extreme load, features should have different priorities.
+
+### Highest Priority
+
+- Redirect existing valid URLs.
+
+### Lower Priority
+
+- Real-time analytics
+- Device enrichment
+- Referrer enrichment
+- Dashboard freshness
+- URL previews
+- Complex reports
+
+During overload:
+
+- Continue redirects.
+- Serve cached mappings.
+- Delay analytics.
+- Reduce event enrichment.
+- Show cached reports.
+- Reject excessive creation traffic.
+- Apply load shedding.
+- Temporarily reduce dashboard freshness.
+
+Redirect availability is more important than real-time analytics accuracy.
+
+---
+
+## 38. Monitoring and Alerting
+
+### Application Metrics
+
+- Redirect requests per second
+- Creation requests per second
+- p50 redirect latency
+- p95 redirect latency
+- p99 redirect latency
+- Error rate
+- `404` rate
+- `409` conflict rate
+- `429` rate
+- Cache hit ratio
+
+### Cache Metrics
+
+- Redis latency
+- Redis memory usage
+- Cache eviction rate
+- Hot-key frequency
+- Local-cache hit ratio
+- CDN hit ratio
+
+### Database Metrics
+
+- Read latency
+- Write latency
+- Throttled requests
+- Partition hot spots
+- Replication lag
+- Storage growth
+
+### Analytics Metrics
+
+- Queue lag
+- Event throughput
+- Failed events
+- Dead-letter queue size
+- Dashboard freshness
+
+### Security Metrics
+
+- Blocked URL count
+- Rate-limit violations
+- Suspicious accounts
+- Phishing reports
+- Bot creation patterns
+- DDoS traffic
+
+### Example Alerts
+
+- Redirect p99 latency exceeds 100 ms.
+- Error rate exceeds 1%.
+- Cache hit ratio drops suddenly.
+- Database throttling increases.
+- Queue lag keeps growing.
+- Redis memory exceeds 80%.
+- Blocked URL creation suddenly increases.
+
+---
+
+## 39. Cost Optimization
+
+Main cost drivers:
+
+- Redirect bandwidth
+- CDN usage
+- Redis memory
+- Database reads and writes
+- Event-stream traffic
+- Raw analytics storage
+- Stream processing
+- Warehouse queries
+- Cross-region replication
+
+Optimization techniques:
+
+- Cache popular URLs.
+- Use CDN for viral links.
+- Compress analytics events.
+- Batch analytics writes.
+- Aggregate old analytics.
+- Archive inactive URLs.
+- Use hot, warm and cold storage tiers.
+- Avoid unnecessary indexes.
+- Set clear data-retention periods.
+- Avoid storing raw clicks forever.
+- Use spot instances for retryable batch jobs.
+
+At billions of requests, even a small inefficiency becomes expensive.
+
+---
+
+## 40. Important Trade-Offs
+
+### 301 vs 302
+
+~~~text
+301:
+Better browser caching
+Lower origin traffic
+Weaker analytics and control
+
+302:
+Better analytics and control
+Higher infrastructure traffic
+~~~
+
+### Hashing vs Counter
+
+~~~text
+Hashing:
+Simple generation
+Truncated output can collide
+
+Counter:
+Guaranteed uniqueness
+Counter must be scaled
+~~~
+
+### SQL vs NoSQL
+
+~~~text
+SQL:
+Strong constraints
+Rich queries
+Relationships
+
+NoSQL:
+Horizontal scalability
+Fast key-value lookup
+High throughput
+~~~
+
+### Synchronous vs Asynchronous Analytics
+
+~~~text
+Synchronous:
+Immediate analytics
+Slower redirect
+
+Asynchronous:
+Fast redirect
+Eventually consistent analytics
+~~~
+
+### Deduplication vs Separate Short URLs
+
+~~~text
+Deduplication:
+Less storage
+Same code for the same URL
+
+Separate short URLs:
+More storage
+Separate analytics for every campaign
+~~~
+
+### Global Writes vs Primary-Region Writes
+
+~~~text
+Global writes:
+Lower regional latency
+Higher conflict complexity
+
+Primary-region writes:
+Simpler uniqueness
+Higher latency for distant users
+~~~
+
+### CDN Caching vs Complete Analytics
+
+~~~text
+More CDN caching:
+Lower latency
+Lower origin load
+Potentially less origin-level analytics
+
+Less CDN caching:
+More complete origin visibility
+Higher infrastructure load
+~~~
+
+---
+
+## 41. Common Anti-Patterns
+
+Avoid:
+
+- Processing heavy analytics inside the redirect request.
+- Updating the main URL row on every click.
+- Using `301` while promising complete analytics.
+- Using truncated hashes without collision handling.
+- Depending on one global counter without a scaling plan.
+- Ignoring custom alias race conditions.
+- Skipping URL validation.
+- Allowing unlimited URL creation.
+- Hitting the database on every redirect.
+- Storing raw analytics forever.
+- Allowing analytics failure to stop redirects.
+- Ignoring viral hot keys.
+- Caching a redirect beyond its expiration time.
+- Treating obfuscated URLs as private URLs.
+- Making the creation service a dependency of the redirect service.
+
+---
+
+## 42. Startup Architecture
+
+### Scenario
+
+A startup expects:
+
+- 10 million URLs in the first year
+- Moderate traffic
+- Fast development
+- A small engineering team
+
+### Recommended Architecture
+
+~~~text
+Client
+  |
+  v
+Load Balancer
+  |
+  v
+URL Shortener Application
+  |
+  +----------+
+  |          |
+  v          v
+Redis    PostgreSQL
+~~~
+
+### Recommended Decisions
+
+- Use PostgreSQL for URL mappings and users.
+- Use a database sequence.
+- Convert IDs to Base62.
+- Use `302` redirects.
+- Add Redis for popular URLs.
+- Use a background queue for analytics.
+- Use a unique constraint for custom aliases.
+- Deploy multiple stateless application instances.
+
+### Defer Until Needed
+
+- Multi-region active-active deployment
+- Complex Snowflake generator
+- Large Kafka cluster
+- Global data warehouse
+- Advanced hot-key sharding
+- Global consensus for aliases
+- Multiple regional Redis clusters
+
+A simpler architecture is easier and cheaper to operate.
+
+---
+
+## 43. Global High-Scale Architecture
+
+### Scenario
+
+The system expects:
+
+- 100,000 redirects per second
+- Global users
+- Viral traffic spikes
+- High availability
+
+### Recommended Read Architecture
+
+~~~text
+CDN / Edge / WAF
+        |
+        v
+Global Traffic Manager
+        |
+        v
+Regional Load Balancer
+        |
+        v
+Stateless Redirect Services
+        |
+        v
+Local Cache
+        |
+        v
+Regional Redis
+        |
+        v
+Replicated NoSQL URL Store
+~~~
+
+### Recommended Creation Architecture
+
+~~~text
+Creation API
+     |
+     v
+Authentication
+     |
+     v
+Rate Limiter
+     |
+     v
+URL Validation
+     |
+     v
+Distributed ID Generator
+     |
+     v
+Base62 Encoder
+     |
+     v
+NoSQL Mapping Store
+~~~
+
+### Recommended Analytics Architecture
+
+~~~text
+Redirect Event
+     |
+     v
+Kafka / Kinesis / Event Hubs
+     |
+     v
+Flink / Spark / Stream Processor
+     |
+     v
+Aggregated Analytics Store
+     |
+     v
+Data Warehouse
+     |
+     v
+Analytics Dashboard
+~~~
+
+Required protections:
+
+- CDN caching
+- Regional caches
+- Hot-key protection
+- Autoscaling
+- WAF
+- DDoS protection
+- Distributed rate limiting
+- Cross-region replication
+- Graceful degradation
+- Monitoring and tracing
+
+---
+
+## 44. Important Scenario Answers
+
+### Celebrity Link Receives 100× Traffic
+
+- CDN serves most redirects.
+- Local caches reduce Redis traffic.
+- Redis handles regional cache misses.
+- Redirect services autoscale.
+- Analytics remains asynchronous.
+- Detailed analytics can be sampled temporarily.
+- DDoS protection separates genuine users from attacks.
+
+### Two Users Request the Same Alias
+
+- Both requests attempt an atomic insert.
+- The database accepts one request.
+- The other receives `409 Conflict`.
+- Do not rely only on an availability check.
+
+### Redis Goes Down
+
+- CDN continues serving cached redirects.
+- Local cache handles some requests.
+- Controlled traffic falls back to the database.
+- A circuit breaker avoids repeated Redis timeouts.
+- Load shedding protects the database.
+- Redis failover activates a replica.
+
+### Analytics Is Delayed by Ten Minutes
+
+This is usually acceptable because analytics can be eventually consistent.
+
+Redirects should continue.
+
+The dashboard should display its last updated time.
+
+### User Submits a Phishing URL
+
+- Check the destination against threat intelligence.
+- Reject known malicious domains.
+- Mark the URL as blocked.
+- Purge the URL from caches.
+- Return `403 Forbidden`.
+- Record the security event.
+- Suspend repeat offenders if required.
+
+### Generated Codes Are Predictable
+
+Possible solutions:
+
+- Permute numeric IDs.
+- XOR IDs with a secret.
+- Use random codes with collision checks.
+- Require authentication for private content.
+
+Predictability should not be treated as the only security control.
+
+### CDN Serves an Expired URL
+
+- Do not cache beyond `expires_at`.
+- Use expiration-aware cache headers.
+- Purge caches when a link is disabled.
+- Use shorter TTLs for editable links.
+- Validate expiration at the origin.
+
+---
+
+## 45. Interview Design Sequence
+
+Use this order during an interview:
+
+1. Clarify core users and actions.
+2. List functional requirements.
+3. List non-functional requirements.
+4. Estimate traffic and storage.
+5. Identify the redirect path as the hot path.
+6. Design the APIs.
+7. Choose between `301` and `302`.
+8. Design the URL mapping schema.
+9. Choose SQL, NoSQL or a hybrid.
+10. Select a short-code generation strategy.
+11. Handle custom aliases.
+12. Handle collisions and race conditions.
+13. Add caching.
+14. Separate read and write paths.
+15. Add an asynchronous analytics pipeline.
+16. Add rate limiting.
+17. Add abuse prevention.
+18. Handle viral traffic.
+19. Add global distribution.
+20. Explain failure handling.
+21. Explain graceful degradation.
+22. Add monitoring.
+23. Discuss cost optimization.
+24. Review all major trade-offs.
+
+Do not start by randomly drawing servers.
+
+Start with:
+
+> Requirements → Traffic → Access patterns → Hot path → Architecture
+
+---
+
+## 46. Interview Questions and Short Answers
+
+### Why is the redirect path the hot path?
+
+A URL is created once but may be clicked millions of times. Redirect traffic greatly exceeds creation traffic.
+
+### Why is Base62 useful?
+
+Base62 represents large numeric IDs using fewer URL-friendly characters.
+
+### Why can truncated hashing cause collisions?
+
+The complete hash has a large key space. Truncating it into a short code reduces the key space, allowing two URLs to produce the same code.
+
+### Why use a 302 redirect?
+
+It keeps the shortener in the request path, supporting analytics, expiration, destination changes and abuse blocking.
+
+### Why not update the click count directly?
+
+A popular link would cause many writes to one record or partition, creating contention and increased latency.
+
+### Why should analytics be asynchronous?
+
+Redirects require very low latency. Analytics enrichment and aggregation are slower and can tolerate delays.
+
+### What is a hot key?
+
+A key receiving much more traffic than other keys, potentially overloading a cache node or database partition.
+
+### Why is caching essential?
+
+Without caching, every redirect reaches the database. CDN, local cache and Redis absorb most read traffic.
+
+### What happens if Redis fails?
+
+The system uses CDN, local cache and controlled database fallback while circuit breakers and load shedding protect the database.
+
+### How are custom alias conflicts handled?
+
+Use an atomic conditional insert or unique constraint. One request succeeds and competing requests receive `409 Conflict`.
+
+### How do we support global low-latency redirects?
+
+Use CDN edge caching, regional redirect services, regional caches, replicated URL data and nearest-region routing.
+
+### Should the same long URL always return the same short code?
+
+Not necessarily. Separate codes provide separate analytics for different users and campaigns.
+
+### Why is NoSQL useful for URL mappings?
+
+The main access pattern is a simple key-value lookup by short code. NoSQL databases can scale this workload horizontally.
+
+### Can analytics be delayed?
+
+Yes. Analytics can usually be eventually consistent as long as redirects remain correct and fast.
+
+---
+
+## 47. Quick Revision
+
+~~~text
+System type:
+Read-heavy, latency-sensitive and globally accessible
+
+Hot path:
+short_code → cache → database → long_url → 302 redirect
+
+Creation:
+ID generator → Base62 → conditional database insert
+
+Storage:
+NoSQL for URL mappings
+SQL for users and billing
+Stream and warehouse for analytics
+
+Redirect status:
+302 when analytics and destination control matter
+
+Caching:
+CDN → local cache → Redis → database
+
+Analytics:
+Publish click events asynchronously
+Process through Kafka, Kinesis or Event Hubs
+Store aggregated results separately
+
+Uniqueness:
+Counter or distributed ID + Base62
+
+Custom aliases:
+Validate aliases
+Reject reserved words
+Use atomic uniqueness checks
+
+Abuse prevention:
+Rate limiting
+URL validation
+Phishing checks
+WAF
+DDoS protection
+
+Viral traffic:
+CDN caching
+Hot-key protection
+Autoscaling
+Graceful degradation
+
+Failure priority:
+Existing redirects must continue even if creation or analytics fails
+~~~
+
+---
+
+## 48. Top 10 Points to Remember
+
+1. A URL shortener is a read-heavy system.
+2. Redirect latency is more important than URL creation latency.
+3. The short-code lookup is the core hot path.
+4. Use `302` when analytics and destination control matter.
+5. Truncated hashes can create collisions.
+6. Counter-based or distributed IDs with Base62 provide reliable uniqueness.
+7. Custom aliases require atomic conflict handling.
+8. Caching prevents every redirect from reaching the database.
+9. Analytics should be asynchronous and eventually consistent.
+10. Viral links create hot-key and hot-partition problems.
+
+---
+
+## 49. Final Architecture Summary
+
+### Read Path
+
+~~~text
+User
+  → CDN / Edge
+  → Load Balancer
+  → Redirect Service
+  → Local Cache
+  → Redis
+  → NoSQL Mapping Store
+  → 302 Redirect
+~~~
+
+### Write Path
+
+~~~text
+User
+  → Load Balancer
+  → Shortening Service
+  → Authentication
+  → Rate Limiter
+  → URL Validation
+  → Distributed ID Generator
+  → Base62 Encoder
+  → Conditional Database Write
+  → Short URL Response
+~~~
+
+### Analytics Path
+
+~~~text
+Redirect Service
+  → Event Stream
+  → Stream Processor
+  → Aggregated Analytics Store
+  → Data Warehouse
+  → Analytics API
+~~~
+
+---
+
+## 50. Final Principle
+
+A good URL shortener design is not mainly about shortening strings.
+
+It is about building a highly available, low-latency and read-heavy redirect system while preserving:
+
+- Short-code uniqueness
+- Accurate-enough analytics
+- Link safety
+- Global scalability
+- Failure isolation
+- Cost efficiency
+- Abuse prevention
