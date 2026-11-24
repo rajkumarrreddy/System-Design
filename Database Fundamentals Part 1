@@ -1,0 +1,2595 @@
+# Database Fundamentals Part 1
+
+## 1. Section Goal
+
+This section explains how to select the correct database for a system.
+
+The goal is not to decide whether SQL or NoSQL is universally better. The goal is to match the database model to the workload.
+
+Database selection depends on:
+
+- Access patterns
+- Consistency requirements
+- Transaction requirements
+- Read and write volume
+- Data relationships
+- Query flexibility
+- Latency requirements
+- Horizontal scaling needs
+- Global distribution
+- Operational complexity
+- Team expertise
+- Infrastructure cost
+
+Core principle:
+
+> Do not ask, “Which database is best?” Ask, “Which database best fits this workload?”
+
+---
+
+# 2. Database Selection Mental Model
+
+Before selecting a database, answer these questions:
+
+1. What are the core entities?
+2. What are the most common read queries?
+3. What are the most common write operations?
+4. Is the workload read-heavy or write-heavy?
+5. Do we need transactions?
+6. Do we need strict consistency?
+7. Is eventual consistency acceptable?
+8. Do we need joins?
+9. Do we need ad hoc queries?
+10. Is the data tabular, nested, key-based, time-series or relationship-heavy?
+11. Do we know the access patterns in advance?
+12. What is the expected data volume?
+13. Do we need global reads or writes?
+14. What latency is required?
+15. What happens if data is stale?
+16. What happens if data is lost?
+17. What happens if two users update the same data?
+18. Does the team have the skills to operate the database?
+19. Can a simpler technology solve the problem?
+20. What is the migration plan if the decision becomes incorrect?
+
+Database selection should begin with access patterns, not database product names.
+
+---
+
+# 3. Main Database Models
+
+The major database models are:
+
+1. SQL or relational databases
+2. Document databases
+3. Key-value stores
+4. Column-family stores
+5. Graph databases
+
+Quick selection guide:
+
+| Requirement | Suitable database model |
+|---|---|
+| Transactions, joins and strong consistency | SQL |
+| Flexible and nested records | Document database |
+| Fast lookup using a known key | Key-value store |
+| Massive writes and predictable queries | Column-family store |
+| Relationship traversal | Graph database |
+
+---
+
+# 4. SQL Databases
+
+SQL databases organize data into:
+
+- Tables
+- Rows
+- Columns
+- Primary keys
+- Foreign keys
+- Constraints
+- Relationships
+
+Examples include:
+
+- PostgreSQL
+- MySQL
+- Microsoft SQL Server
+- Oracle Database
+- Azure SQL Database
+- Amazon Aurora
+
+SQL databases are a strong default for many production applications.
+
+## Strengths
+
+- ACID transactions
+- Strong consistency
+- Relational modeling
+- Joins
+- Constraints
+- Ad hoc queries
+- Mature tooling
+- Reporting support
+- Large ecosystem
+- Developer familiarity
+- Backup and recovery support
+
+## Challenges
+
+- Horizontal scaling is harder.
+- Sharding adds operational complexity.
+- Joins across shards are difficult.
+- Cross-shard transactions are expensive.
+- Global writes are difficult.
+- Large schema migrations can be risky.
+- Read replicas may have replication lag.
+- Vertical scaling can become expensive.
+
+## Use SQL When
+
+- Data integrity is critical.
+- Transactions are required.
+- Relationships are important.
+- Queries span multiple entities.
+- Reporting and ad hoc queries are needed.
+- Unique and foreign-key constraints are important.
+- Money, inventory, booking or ownership must remain correct.
+
+Common SQL use cases:
+
+- Banking
+- Payments
+- Orders
+- Inventory
+- Booking systems
+- Billing
+- Subscriptions
+- User accounts
+- Financial reports
+- Audit records
+
+---
+
+# 5. SQL Scaling Strategies
+
+Do not immediately replace SQL with NoSQL when performance problems appear.
+
+First consider the following strategies.
+
+## 5.1 Indexing
+
+Create indexes for frequently used queries.
+
+Example:
+
+~~~sql
+CREATE INDEX idx_orders_user_created
+ON orders(user_id, created_at);
+~~~
+
+Benefits:
+
+- Faster filtering
+- Faster sorting
+- Faster joins
+
+Trade-off:
+
+- Each index consumes storage.
+- Indexes make writes more expensive.
+- Unused indexes add maintenance overhead.
+
+---
+
+## 5.2 Connection Pooling
+
+Database connections are expensive.
+
+Connection pools reuse existing connections instead of creating a new connection for every request.
+
+Examples:
+
+- HikariCP for Java
+- PgBouncer for PostgreSQL
+- Azure SQL connection pooling
+
+Benefits:
+
+- Lower connection overhead
+- Better throughput
+- Protection against connection exhaustion
+
+---
+
+## 5.3 Caching
+
+Use Redis or Memcached for frequently accessed data.
+
+Flow:
+
+~~~text
+Application
+    |
+    v
+Cache
+    |
+    v
+SQL Database
+~~~
+
+Caching reduces database reads and improves response time.
+
+---
+
+## 5.4 Read Replicas
+
+Send writes to the primary database and eligible reads to replicas.
+
+~~~text
+                 +--> Read Replica 1
+Application -----+--> Read Replica 2
+                 |
+                 +--> Primary Database for writes
+~~~
+
+Best for:
+
+- Read-heavy workloads
+- Reports
+- Product browsing
+- Non-critical stale reads
+
+Trade-off:
+
+- Replicas may lag behind the primary.
+- A user may temporarily read stale data.
+
+---
+
+## 5.5 Partitioning
+
+Split a large table into smaller logical sections.
+
+Possible partition keys:
+
+- Date
+- Region
+- Customer
+- Tenant
+- Category
+
+Example:
+
+~~~text
+orders_2025
+orders_2026
+orders_2027
+~~~
+
+Partitioning improves manageability and may improve query performance when queries target specific partitions.
+
+---
+
+## 5.6 Sharding
+
+Sharding distributes data across multiple database servers.
+
+Example:
+
+~~~text
+Users 1-1,000,000       → Shard A
+Users 1,000,001-2,000,000 → Shard B
+Users 2,000,001-3,000,000 → Shard C
+~~~
+
+Challenges:
+
+- Shard-key selection
+- Cross-shard joins
+- Cross-shard transactions
+- Rebalancing
+- Uneven shard load
+- Operational complexity
+
+Do not shard too early.
+
+---
+
+## 5.7 Online Schema Migration
+
+Large schema changes can lock tables or slow production systems.
+
+Use:
+
+- Backward-compatible changes
+- Expand-and-contract migration
+- Small batches
+- Online migration tools
+- Careful monitoring
+
+The application should support the old and new schema during migration.
+
+---
+
+# 6. SQL Scaling Limits
+
+SQL becomes difficult when:
+
+- One machine cannot support the write load.
+- Transactions must span many shards.
+- Joins must cross shards.
+- Global users require low write latency.
+- A single primary becomes the write bottleneck.
+- Schema migrations affect enormous tables.
+- Replication lag becomes unacceptable.
+- Hardware and database licensing costs become excessive.
+
+Important principle:
+
+> SQL can scale very far using indexes, caching, replicas, partitioning and careful design. NoSQL should be selected when the workload requires its trade-offs, not simply because the system is expected to grow.
+
+---
+
+# 7. ACID Properties
+
+ACID stands for:
+
+- Atomicity
+- Consistency
+- Isolation
+- Durability
+
+ACID properties make transactions reliable.
+
+Use strong ACID guarantees when incorrect data can cause serious business damage.
+
+Examples:
+
+- Bank transfers
+- Payments
+- Inventory deduction
+- Seat booking
+- Subscription billing
+- Legal records
+- Ownership transfer
+
+---
+
+# 8. Atomicity
+
+Atomicity means:
+
+> All operations in a transaction succeed, or all operations fail.
+
+Consider a bank transfer:
+
+1. Deduct ₹1,000 from Account A.
+2. Add ₹1,000 to Account B.
+
+Without atomicity, the system could fail after deducting the money but before adding it to Account B.
+
+With atomicity:
+
+~~~text
+Both operations succeed
+        OR
+Both operations roll back
+~~~
+
+Example:
+
+~~~sql
+BEGIN;
+
+UPDATE accounts
+SET balance = balance - 1000
+WHERE account_id = 'A';
+
+UPDATE accounts
+SET balance = balance + 1000
+WHERE account_id = 'B';
+
+COMMIT;
+~~~
+
+If any operation fails:
+
+~~~sql
+ROLLBACK;
+~~~
+
+Databases support atomicity using:
+
+- Transaction logs
+- Write-ahead logs
+- Rollback mechanisms
+- Commit boundaries
+
+Use atomicity when partial success would cause business damage.
+
+---
+
+# 9. Consistency
+
+Consistency means:
+
+> A transaction moves the database from one valid state to another valid state.
+
+Examples of consistency rules:
+
+- Inventory cannot be negative.
+- An email address must be unique.
+- An order must reference a valid customer.
+- A foreign key must point to an existing row.
+- A bank balance must follow business rules.
+- A discount must follow company policy.
+
+Database mechanisms include:
+
+- Primary keys
+- Foreign keys
+- Unique constraints
+- Check constraints
+- Not-null constraints
+
+Example:
+
+~~~sql
+CREATE TABLE products (
+    product_id BIGINT PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    inventory INT NOT NULL CHECK (inventory >= 0)
+);
+~~~
+
+Consistency is not only the database's responsibility.
+
+The application must also enforce business rules that cannot be expressed through database constraints.
+
+---
+
+# 10. Isolation
+
+Isolation prevents concurrent transactions from incorrectly affecting each other.
+
+Example:
+
+Two users attempt to buy the last product at the same time.
+
+Without proper isolation:
+
+1. Both transactions read inventory as `1`.
+2. Both transactions complete the purchase.
+3. The system sells two items even though only one exists.
+
+Common concurrency problems include:
+
+- Dirty reads
+- Non-repeatable reads
+- Phantom reads
+- Lost updates
+- Race conditions
+
+Higher isolation improves correctness but may reduce concurrency and throughput.
+
+---
+
+# 11. Isolation Levels
+
+## 11.1 Read Uncommitted
+
+A transaction may read another transaction's uncommitted data.
+
+Possible problem:
+
+- Dirty reads
+
+It is fast but unsafe for most serious systems.
+
+---
+
+## 11.2 Read Committed
+
+A transaction reads only committed data.
+
+It prevents dirty reads.
+
+It is a common default for many applications.
+
+Possible remaining problems:
+
+- Non-repeatable reads
+- Phantom reads
+- Lost updates if not handled carefully
+
+---
+
+## 11.3 Repeatable Read
+
+A row read multiple times inside a transaction remains consistent for that transaction.
+
+It provides stronger consistency but adds overhead.
+
+Depending on the database implementation, phantom rows may still require additional handling.
+
+---
+
+## 11.4 Serializable
+
+Transactions behave as if they were executed one after another.
+
+It provides the strongest isolation.
+
+Best for:
+
+- Critical inventory allocation
+- Financial workflows
+- Seat booking
+- Other high-correctness operations
+
+Trade-offs:
+
+- Lower concurrency
+- More locking or conflict detection
+- More retries
+- Lower throughput
+
+Architect rule:
+
+> Do not choose the strongest isolation level everywhere. Choose the level required by the business operation.
+
+---
+
+# 12. Durability
+
+Durability means:
+
+> Once a transaction has been committed, its data must survive failures.
+
+Possible failures include:
+
+- Power failure
+- Server crash
+- Operating-system crash
+- Disk failure
+- Data-center outage
+
+Databases support durability through:
+
+- Persistent storage
+- Write-ahead logs
+- Transaction logs
+- Replication
+- Backups
+- Point-in-time recovery
+- Group commits
+
+Durability has a performance cost because the system may need to write data to durable storage or safe replicas before confirming success.
+
+Strong durability is essential for:
+
+- Payments
+- Legal records
+- Account balances
+- Orders
+- Billing
+
+Weaker durability may be acceptable for:
+
+- Temporary sessions
+- Regenerable cache entries
+- Some analytics events
+- Non-critical activity history
+
+---
+
+# 13. Write-Ahead Log
+
+A write-ahead log records changes before they are applied to the main database files.
+
+Basic flow:
+
+~~~text
+1. Write transaction changes to the log.
+2. Flush the required log data to durable storage.
+3. Mark the transaction as committed.
+4. Apply changes to the main data files.
+~~~
+
+If the system crashes, the database can use the log to:
+
+- Recover committed transactions
+- Roll back incomplete transactions
+- Restore database consistency
+
+---
+
+# 14. MVCC
+
+MVCC stands for Multi-Version Concurrency Control.
+
+Instead of allowing readers and writers to block each other unnecessarily, the database maintains multiple versions of rows.
+
+Example:
+
+~~~text
+Transaction A sees the version from 10:00.
+Transaction B updates the row at 10:01.
+Transaction A can continue using its consistent snapshot.
+~~~
+
+Benefits:
+
+- Better read concurrency
+- Consistent snapshots
+- Less read/write blocking
+
+Trade-offs:
+
+- Old row versions require cleanup.
+- Long transactions may create storage pressure.
+- Implementation and tuning are complex.
+
+PostgreSQL and other relational databases use MVCC.
+
+---
+
+# 15. ACID Trade-Offs
+
+ACID increases correctness but has costs.
+
+| Property | Mechanism and cost |
+|---|---|
+| Atomicity | Transaction logging and rollback management |
+| Consistency | Constraint and business-rule checking |
+| Isolation | Locks, MVCC, versioning or conflict detection |
+| Durability | Disk writes, replication and recovery mechanisms |
+
+Use strong ACID guarantees for:
+
+- Payments
+- Inventory
+- Bank transfers
+- Bookings
+- Billing
+- Subscriptions
+
+Full ACID may be unnecessary for:
+
+- Like counts
+- View counts
+- Recommendations
+- Feed ranking
+- Analytics dashboards
+- Temporary sessions
+- Viewing history
+
+The correct question is:
+
+> Which parts of the system require ACID?
+
+---
+
+# 16. NoSQL
+
+NoSQL means “not only SQL.”
+
+NoSQL databases use non-relational data models and are often designed for:
+
+- Horizontal scalability
+- High availability
+- Flexible data models
+- High write throughput
+- Global distribution
+- Predictable access patterns
+
+NoSQL is not one database type.
+
+It includes:
+
+- Document databases
+- Key-value stores
+- Column-family stores
+- Graph databases
+
+## Strengths
+
+- Horizontal scalability
+- Flexible schemas
+- High throughput
+- High availability
+- Specialized data models
+- Easier distribution for certain workloads
+- Support for eventual consistency
+
+## Weaknesses
+
+- Fewer relational constraints
+- Limited joins
+- Harder ad hoc querying
+- More denormalization
+- Possible data duplication
+- More application-level validation
+- Distributed operational complexity
+- Weaker transaction support in some systems
+
+NoSQL does not mean unstructured or design-free.
+
+NoSQL systems still require careful data modeling.
+
+---
+
+# 17. BASE Properties
+
+BASE stands for:
+
+- Basically Available
+- Soft State
+- Eventually Consistent
+
+## Basically Available
+
+The system remains operational even when some nodes fail.
+
+A request may receive slightly stale data, but the service remains available.
+
+## Soft State
+
+The system's state can change over time because replicas are asynchronously updated.
+
+## Eventually Consistent
+
+Replicas may temporarily show different values but eventually converge.
+
+Example:
+
+~~~text
+User updates profile picture.
+Region A shows the new picture immediately.
+Region B shows the old picture for three seconds.
+Both regions eventually show the new picture.
+~~~
+
+Eventual consistency is acceptable when temporary stale data does not cause serious business damage.
+
+Good candidates:
+
+- Like counts
+- Comment counts
+- Profile-photo propagation
+- Recommendations
+- Feed ranking
+- Analytics
+- Viewing history
+- Telemetry
+
+Poor candidates:
+
+- Bank transfers
+- Account balances
+- Payment settlement
+- Inventory confirmation
+- Seat booking
+- Ownership transfer
+
+Core principle:
+
+> Consistency is a business decision first and a database decision second.
+
+---
+
+# 18. SQL vs NoSQL
+
+| Area | SQL | NoSQL |
+|---|---|---|
+| Data model | Relational tables | Document, key-value, column-family or graph |
+| Schema | Usually structured | Often flexible |
+| Transactions | Strong ACID support | Depends on the database |
+| Joins | Strong support | Usually limited |
+| Query flexibility | High | Often access-pattern-specific |
+| Horizontal scaling | More difficult | Often a core design goal |
+| Consistency | Usually strong | Often tunable or eventual |
+| Best fit | Correctness and relationships | Scale and specialized workloads |
+
+Use SQL when:
+
+- Correctness dominates.
+- Joins are required.
+- Transactions are essential.
+- Ad hoc queries are common.
+- Relationships are important.
+
+Use NoSQL when:
+
+- Horizontal scaling is mandatory.
+- Query patterns are predictable.
+- The data model is non-relational.
+- High write throughput is required.
+- Eventual consistency is acceptable.
+- Global availability matters.
+
+SQL and NoSQL are not enemies. A system may use both.
+
+---
+
+# 19. Document Databases
+
+Document databases store complete entities as JSON-like documents.
+
+Examples:
+
+- MongoDB
+- CouchDB
+- Azure Cosmos DB document model
+
+Example product:
+
+~~~json
+{
+  "product_id": "P1001",
+  "name": "Laptop",
+  "category": "Electronics",
+  "price": 75000,
+  "specifications": {
+    "processor": "Intel Core i7",
+    "ram": "16 GB",
+    "storage": "1 TB SSD"
+  },
+  "available_colors": [
+    "black",
+    "silver"
+  ]
+}
+~~~
+
+Another product may have completely different attributes:
+
+~~~json
+{
+  "product_id": "P2001",
+  "name": "T-Shirt",
+  "category": "Clothing",
+  "price": 1200,
+  "specifications": {
+    "size": "L",
+    "material": "Cotton",
+    "color": "Blue"
+  }
+}
+~~~
+
+## Good Use Cases
+
+- Product catalogs
+- User profiles
+- Content-management systems
+- Listings
+- Flexible business objects
+- Nested entities
+- IoT payloads
+- Rapidly evolving product features
+
+## Strengths
+
+- Flexible schema
+- Natural mapping to application objects
+- Good support for nested data
+- Fewer joins for entity reads
+- Faster product iteration
+- Good read locality
+- Horizontal scaling support in many products
+
+## Weaknesses
+
+- Complex relationships are harder.
+- Cross-document transactions may be costly.
+- Ad hoc reporting can be weaker than SQL.
+- Denormalization creates duplicated data.
+- Duplicated data can become inconsistent.
+- Schema enforcement moves toward application code.
+
+Use document databases when entities are naturally self-contained and can be read as complete documents.
+
+Avoid them when deep relationships, joins and cross-entity reporting dominate.
+
+---
+
+# 20. Document Modeling: Embed vs Reference
+
+## Embed Data When
+
+- Related data is usually read with the parent.
+- Child data belongs strongly to the parent.
+- Child data is not shared across many entities.
+- The document remains reasonably sized.
+- Updates usually affect the complete entity.
+
+Examples:
+
+- Product specifications
+- User preferences
+- Listing amenities
+- Article metadata
+- Shipping address snapshot inside an order
+
+Example:
+
+~~~json
+{
+  "order_id": "ORD-1001",
+  "customer_id": "C-10",
+  "shipping_address": {
+    "city": "Hyderabad",
+    "state": "Telangana",
+    "postal_code": "500001"
+  }
+}
+~~~
+
+---
+
+## Reference Data When
+
+- Data is shared by many documents.
+- Data changes independently.
+- The embedded document would become too large.
+- The relationship is many-to-many.
+- Child data grows without a clear limit.
+
+Examples:
+
+- Users and orders
+- Authors and books
+- Products and suppliers
+- Posts with millions of comments
+
+Architect rule:
+
+> Embed for read locality. Reference when duplication, sharing or unbounded growth becomes dangerous.
+
+---
+
+# 21. Document Database Anti-Patterns
+
+Avoid:
+
+- Treating MongoDB as a dumping ground
+- Allowing uncontrolled field names
+- Creating unbounded arrays
+- Embedding millions of child records
+- Ignoring document-size limits
+- Duplicating frequently changing data everywhere
+- Performing too many cross-document joins
+- Avoiding schema validation completely
+
+Schema-flexible does not mean schema-free.
+
+---
+
+# 22. Key-Value Stores
+
+Key-value stores save data using:
+
+~~~text
+key → value
+~~~
+
+Examples:
+
+~~~text
+session:user-101 → session data
+cart:user-101 → cart data
+rate-limit:ip-1 → request count
+short-code:abc123 → original URL
+~~~
+
+Examples of key-value technologies:
+
+- Redis
+- Amazon DynamoDB
+- Azure Cosmos DB key-value patterns
+- Memcached
+
+## Good Use Cases
+
+- Caching
+- Sessions
+- Shopping carts
+- Counters
+- Rate limiting
+- Leaderboards
+- Distributed locks
+- Feature flags
+- URL lookups
+- Device states
+- Hot data
+
+## Strengths
+
+- Extremely fast key-based lookup
+- Simple API
+- High throughput
+- Easy partitioning by key
+- Good hot-path performance
+- TTL support in many systems
+
+## Weaknesses
+
+- Poor ad hoc querying
+- Limited relationships
+- Limited multi-key transactions
+- Difficult query by unknown dimensions
+- Expensive scans
+- Secondary indexes must be designed explicitly
+
+Use a key-value store when the application knows the key.
+
+Avoid it when users need:
+
+- Flexible search
+- Multiple filters
+- Joins
+- Reports
+- Queries by many dimensions
+
+---
+
+# 23. Redis
+
+Redis is an in-memory data store.
+
+It supports more than simple values:
+
+- Strings
+- Hashes
+- Lists
+- Sets
+- Sorted sets
+- Streams
+- Pub/sub
+- Counters
+- Expiring keys
+
+## Good Redis Use Cases
+
+- Application cache
+- Sessions
+- Rate limiting
+- Counters
+- Leaderboards
+- Distributed locks
+- Temporary data
+- Real-time features
+- Pub/sub
+- Hot lookup data
+
+## Strengths
+
+- Very low latency
+- Powerful data structures
+- Atomic operations
+- TTL support
+- Good for hot data
+
+## Trade-Offs
+
+- RAM is expensive.
+- Memory capacity is limited.
+- Poor eviction settings can remove important data.
+- Persistence may reduce performance.
+- Redis is usually not the right place for large volumes of cold data.
+
+Redis can be a database, but it is commonly used as a speed layer.
+
+---
+
+# 24. DynamoDB
+
+DynamoDB is a durable, managed key-value and document database from AWS.
+
+Good use cases:
+
+- Large shopping carts
+- Device state
+- User preferences
+- Massive key-based lookups
+- Serverless applications
+- Predictable high-scale workloads
+- Globally replicated tables
+
+Strengths:
+
+- Managed infrastructure
+- Horizontal scalability
+- Durable storage
+- Predictable key-based performance
+- Global Tables support
+
+Trade-offs:
+
+- Access patterns must be planned.
+- Scans are expensive.
+- Poor partition-key selection creates hot partitions.
+- Cost depends heavily on read/write patterns.
+- Flexible ad hoc queries are limited.
+
+---
+
+# 25. Redis vs DynamoDB
+
+| Area | Redis | DynamoDB |
+|---|---|---|
+| Primary role | Speed layer | Durable scale layer |
+| Storage | Mainly memory | Durable managed storage |
+| Latency | Extremely low | Low network-based latency |
+| Best for | Cache, sessions, counters | Durable key-value workloads |
+| TTL | Supported | Supported |
+| Query planning | Simpler key access | Must be designed upfront |
+| Cost concern | RAM | Request and storage patterns |
+| Cold storage | Poor fit | Better fit |
+
+Simple rule:
+
+> Redis is commonly the speed layer. DynamoDB is commonly the durable key-value layer.
+
+---
+
+# 26. Cache-Aside Pattern
+
+Cache-aside combines a cache with a primary database.
+
+Flow:
+
+~~~text
+1. Application checks the cache.
+2. If found, return cached data.
+3. If not found, read the database.
+4. Store the result in the cache.
+5. Return the result.
+~~~
+
+Pseudo-code:
+
+~~~text
+value = cache.get(key)
+
+if value exists:
+    return value
+
+value = database.get(key)
+
+if value exists:
+    cache.set(key, value, ttl)
+
+return value
+~~~
+
+Benefits:
+
+- Reduced database load
+- Lower latency
+- Popular data remains hot
+- Simple implementation
+
+Risks:
+
+- Stale data
+- Cache stampede
+- Hot keys
+- Invalidation complexity
+- Cache and database inconsistency
+
+Caching can extend the useful life of the primary database by reducing read pressure.
+
+---
+
+# 27. Column-Family Stores
+
+Column-family databases are designed for:
+
+- Massive write throughput
+- Horizontal scale
+- Predictable queries
+- Time-series-style data
+- Multi-data-center availability
+
+Examples:
+
+- Apache Cassandra
+- Apache HBase
+- Google Cloud Bigtable
+- ScyllaDB
+
+## Good Use Cases
+
+- Logs
+- Event tracking
+- IoT telemetry
+- Time-series data
+- Viewing history
+- Activity feeds
+- Chat messages at large scale
+- Monitoring metrics
+- Financial ticks
+
+## Strengths
+
+- Massive write throughput
+- Horizontal scalability
+- Multi-data-center replication
+- Tunable consistency
+- Efficient time-based access
+- Good for append-heavy data
+
+## Weaknesses
+
+- Poor ad hoc querying
+- Access patterns must be known upfront.
+- Operational complexity is high.
+- Poor partition keys create hot partitions.
+- Tombstones can reduce performance.
+- Compaction and repair require management.
+- They are not replacements for relational transactions.
+
+Use column-family databases when write scale is enormous and queries are predictable.
+
+Avoid them when:
+
+- Data volume is small.
+- Access patterns are unknown.
+- Joins are required.
+- Ad hoc queries are important.
+- Multi-row ACID transactions are necessary.
+- The team lacks operational experience.
+
+---
+
+# 28. Cassandra Data Modeling
+
+In Cassandra, design tables around queries.
+
+Do not begin by creating normalized entities.
+
+Important concepts:
+
+## Partition Key
+
+Determines which node stores the data.
+
+A good partition key:
+
+- Distributes traffic evenly
+- Avoids extremely large partitions
+- Supports the required lookup
+
+## Clustering Key
+
+Determines data ordering inside a partition.
+
+Example table for channel messages:
+
+~~~text
+Partition key: channel_id
+Clustering key: message_timestamp
+~~~
+
+Supported query:
+
+~~~text
+Fetch the latest messages for a channel ordered by time.
+~~~
+
+Conceptual table:
+
+~~~sql
+CREATE TABLE messages_by_channel (
+    channel_id UUID,
+    message_timestamp TIMESTAMP,
+    message_id UUID,
+    sender_id UUID,
+    message_text TEXT,
+    PRIMARY KEY (channel_id, message_timestamp)
+);
+~~~
+
+If the system needs three different query patterns, it may need three different tables containing duplicated data.
+
+This is intentional denormalization.
+
+---
+
+# 29. Cassandra Operational Concerns
+
+Important concerns include:
+
+- Hot partitions
+- Tombstones
+- Compaction
+- Repair processes
+- Consistency levels
+- Disk usage
+- Node failures
+- Data distribution
+- Cluster monitoring
+
+## Hot Partition
+
+A partition receives much more traffic than other partitions.
+
+Example:
+
+~~~text
+One celebrity account
+One popular chat channel
+One extremely active sensor
+One large customer tenant
+~~~
+
+Solutions:
+
+- Select a better partition key.
+- Add time buckets.
+- Salt or shard hot keys.
+- Distribute writes.
+- Redesign the query model.
+
+Example time bucketing:
+
+~~~text
+Partition key = device_id + date
+Clustering key = timestamp
+~~~
+
+Instead of storing all readings for a device in one unlimited partition, create daily or monthly buckets.
+
+---
+
+## Tombstone
+
+Cassandra records a deletion using a tombstone marker.
+
+The tombstone tells replicas that the value was deleted.
+
+Too many tombstones can cause:
+
+- Slow queries
+- More disk reads
+- Higher compaction load
+- Timeouts
+
+---
+
+## Compaction
+
+Compaction merges storage files and removes obsolete records and eligible tombstones.
+
+Compaction requires:
+
+- CPU
+- Disk input/output
+- Temporary disk space
+
+Poor compaction tuning can affect cluster performance.
+
+---
+
+# 30. Graph Databases
+
+Graph databases store:
+
+- Nodes
+- Edges
+- Properties
+
+Examples:
+
+- Neo4j
+- Amazon Neptune
+- Azure Cosmos DB Gremlin API
+
+## Node
+
+A node represents an entity.
+
+Examples:
+
+- Person
+- Account
+- Device
+- Product
+- Company
+- Transaction
+- Movie
+
+## Edge
+
+An edge represents a relationship.
+
+Examples:
+
+- FOLLOWS
+- PURCHASED
+- SENT_TO
+- WORKS_AT
+- WATCHED
+- CONNECTED_TO
+- RECOMMENDED_WITH
+
+## Properties
+
+Properties contain metadata about nodes or edges.
+
+Examples:
+
+- Date
+- Amount
+- Role
+- Location
+- Risk score
+- Timestamp
+
+Example:
+
+~~~text
+User ──WATCHED──> Movie
+Account ──SENT_MONEY_TO──> Account
+Person ──WORKS_AT──> Company
+Product ──BOUGHT_WITH──> Product
+~~~
+
+---
+
+# 31. Graph Database Use Cases
+
+Graph databases are useful for:
+
+- Social networks
+- Fraud detection
+- Recommendations
+- Knowledge graphs
+- Pathfinding
+- Supply-chain analysis
+- Permission graphs
+- Network topology
+- Dependency analysis
+
+Graph databases are strongest when relationships are the main business value.
+
+Example fraud question:
+
+> Find accounts connected to the same device, IP address or bank account within three relationship hops.
+
+This is naturally expressed as graph traversal.
+
+---
+
+# 32. Graph Database Strengths and Weaknesses
+
+## Strengths
+
+- Fast relationship traversal
+- Relationships are first-class data
+- Natural pattern matching
+- Easier multi-hop queries
+- Useful for identifying hidden connections
+
+## Weaknesses
+
+- Global aggregations are not ideal.
+- Horizontal scaling is difficult.
+- Graph partitioning is difficult.
+- Extremely high relationship-write volume can be costly.
+- Supernodes can create bottlenecks.
+- Simple tabular reporting is often better in SQL or analytics systems.
+
+## Supernode
+
+A supernode is a node with an extremely large number of relationships.
+
+Examples:
+
+- A celebrity with hundreds of millions of followers
+- A global merchant with millions of transactions
+- A popular product connected to millions of users
+
+Supernodes can make traversal and partitioning difficult.
+
+Use graph databases when:
+
+- Relationships are central.
+- Queries traverse multiple hops.
+- Pathfinding matters.
+- Pattern detection matters.
+- SQL joins become excessively deep.
+
+Avoid graph databases when:
+
+- Data is mostly tabular.
+- Relationships are shallow.
+- Reporting is the main workload.
+- Write volume is extremely high.
+- SQL already handles the relationship cleanly.
+
+---
+
+# 33. Database Model Comparison
+
+| Model | Best for | Main strength | Main limitation |
+|---|---|---|---|
+| SQL | Transactions and relationships | Correctness and query flexibility | Distributed horizontal scaling |
+| Document | Flexible nested entities | Schema flexibility and read locality | Complex relationships |
+| Key-value | Fast lookup by key | Speed and throughput | Query flexibility |
+| Column-family | Massive writes and time-series | Horizontal write scale | Must know queries upfront |
+| Graph | Connected data | Multi-hop traversal | Horizontal graph partitioning |
+
+Quick decision:
+
+~~~text
+Need correctness and joins?
+→ SQL
+
+Need flexible nested documents?
+→ Document database
+
+Need very fast key lookup?
+→ Key-value store
+
+Need massive writes with known queries?
+→ Column-family store
+
+Need relationship traversal?
+→ Graph database
+~~~
+
+---
+
+# 34. Polyglot Persistence
+
+Polyglot persistence means using different database technologies for different workloads in the same system.
+
+Example e-commerce architecture:
+
+~~~text
+Users, orders and payments → PostgreSQL
+Product catalog → MongoDB
+Shopping carts and sessions → Redis or DynamoDB
+Search → Elasticsearch
+Analytics events → Cassandra or event storage
+Reports → Data warehouse
+Recommendations → Graph or ML platform
+~~~
+
+## Benefits
+
+- Each database handles the workload it suits best.
+- Critical data can use ACID.
+- Cacheable data can use Redis.
+- Write-heavy events can use Cassandra.
+- Search can use Elasticsearch.
+- Relationship analysis can use a graph database.
+
+## Risks
+
+- More operational complexity
+- More technologies to maintain
+- More data pipelines
+- Cross-system consistency problems
+- More monitoring
+- More expertise required
+- More difficult backups and recovery
+- More complex incident response
+
+Architect rule:
+
+> Use polyglot persistence only when the benefit clearly justifies the added complexity.
+
+Start with the simplest database that meets the requirements.
+
+---
+
+# 35. Workload-to-Database Mapping
+
+## Bank Transfer
+
+Recommended:
+
+- SQL database
+
+Reason:
+
+- ACID transactions
+- Strong consistency
+- Auditability
+- No partial transfers
+
+---
+
+## Shopping Cart at Massive Scale
+
+Recommended:
+
+- DynamoDB or another durable key-value store
+- Redis may be used as a cache
+
+Reason:
+
+- Fast lookup by user ID
+- High scalability
+- Simple access pattern
+
+Checkout should use stronger consistency and transactional controls.
+
+---
+
+## User Session
+
+Recommended:
+
+- Redis
+
+Reason:
+
+- Low latency
+- Key-based access
+- TTL support
+- Temporary data
+
+---
+
+## Product Catalog
+
+Recommended:
+
+- Document database for products with varied attributes
+- SQL can still work when the schema is stable
+
+Reason:
+
+- Products may have different specifications.
+- Product documents are naturally nested.
+
+---
+
+## Orders and Payments
+
+Recommended:
+
+- SQL
+
+Reason:
+
+- Transactions
+- Integrity
+- Auditing
+- Strong consistency
+
+---
+
+## Inventory
+
+Recommended:
+
+- SQL or another transaction-capable database
+
+Reason:
+
+- Inventory must not be oversold.
+- Concurrent updates require control.
+- Strong consistency is important during checkout.
+
+---
+
+## IoT Sensor Data
+
+Recommended:
+
+- Column-family or specialized time-series database
+
+Reason:
+
+- Massive write throughput
+- Queries by device and time range
+- Append-heavy workload
+
+---
+
+## Fraud Detection
+
+Recommended:
+
+- Graph database for relationship discovery
+- SQL for payment correctness
+- Analytics platform for large-scale reporting
+
+Reason:
+
+- Fraud often involves relationships among users, devices, cards, accounts, merchants and IP addresses.
+
+---
+
+## Search
+
+Recommended:
+
+- Elasticsearch or OpenSearch
+
+Reason:
+
+- Full-text search
+- Relevance scoring
+- Faceting
+- Flexible filtering
+
+Do not force a simple key-value store to perform full-text search.
+
+---
+
+## Analytics Dashboard
+
+Recommended:
+
+- Data warehouse
+- Columnar analytical database
+- Dedicated reporting database
+
+Examples:
+
+- Snowflake
+- Google BigQuery
+- Amazon Redshift
+- Azure Synapse Analytics
+
+Do not run expensive analytical queries directly against a busy transactional database.
+
+---
+
+# 36. E-Commerce Database Design Exercise
+
+An e-commerce platform contains:
+
+- Users
+- Products
+- Carts
+- Orders
+- Payments
+- Inventory
+- Reviews
+- Analytics
+- Recommendations
+
+Suggested database choices:
+
+| Component | Database model | Reason |
+|---|---|---|
+| Users | SQL | Structured records and constraints |
+| Product catalog | Document or SQL | Flexible product attributes |
+| Shopping carts | Key-value | Fast lookup by user ID |
+| Orders | SQL | Transactional correctness |
+| Payments | SQL | ACID and auditability |
+| Inventory | SQL | Strong consistency |
+| Reviews | SQL or document | Depends on query patterns |
+| Analytics events | Event/column-family storage | High write volume |
+| Recommendations | Graph or ML platform | Relationship-based insights |
+| Search | Elasticsearch/OpenSearch | Full-text search |
+
+The system should not use multiple databases simply because it can.
+
+Each additional technology must solve a clear workload problem.
+
+---
+
+# 37. IoT Platform Exercise
+
+Scenario:
+
+- 10 million devices
+- One reading per second per device
+- Recent reads by device and time range
+- Long-term business reports
+
+## Operational Database
+
+Use:
+
+- Cassandra
+- HBase
+- Bigtable
+- A specialized time-series database
+
+## Partition Strategy
+
+Possible model:
+
+~~~text
+Partition key = device_id + time_bucket
+Clustering key = reading_timestamp
+~~~
+
+Example:
+
+~~~text
+device-1001:2026-11-24
+~~~
+
+Time buckets prevent unlimited partition growth.
+
+## Retention
+
+Example strategy:
+
+~~~text
+Recent raw readings → Operational store
+Older raw readings → Object storage
+Hourly summaries → Analytical store
+Daily summaries → Data warehouse
+~~~
+
+## Metadata
+
+Store device metadata in SQL:
+
+- Device owner
+- Device type
+- Installation date
+- Subscription
+- Location
+
+## Consistency
+
+Eventual consistency may be acceptable for telemetry when a reading appears a few seconds late.
+
+Strong consistency may be required for:
+
+- Device ownership
+- Billing
+- Security settings
+- Critical control commands
+
+## Why SQL Alone May Struggle
+
+- Extremely high write throughput
+- Massive table growth
+- Large index maintenance cost
+- Difficult horizontal scaling
+- Time-based storage pressure
+
+SQL may still be used for metadata and reports.
+
+---
+
+# 38. Fraud Detection Exercise
+
+Fraud detection must find suspicious relationships among:
+
+- Users
+- Devices
+- Cards
+- IP addresses
+- Bank accounts
+- Merchants
+- Transactions
+
+## Possible Nodes
+
+- User
+- Device
+- Card
+- IPAddress
+- BankAccount
+- Merchant
+- Transaction
+
+## Possible Edges
+
+~~~text
+User ──USES──> Device
+User ──OWNS──> Card
+Device ──CONNECTED_FROM──> IPAddress
+Card ──USED_FOR──> Transaction
+Transaction ──PAID_TO──> Merchant
+BankAccount ──RECEIVED_FROM──> BankAccount
+~~~
+
+## Example Traversal Questions
+
+- Which users share the same device?
+- Which cards were used from the same suspicious IP?
+- Are multiple accounts sending money to the same beneficiary?
+- Is this account connected to a known fraudulent account within three hops?
+- Which merchants are connected to repeated chargeback activity?
+
+## Where SQL Is Still Needed
+
+Use SQL for:
+
+- Authoritative payments
+- Balances
+- Settlement
+- Audit records
+- Transaction correctness
+
+## Where Analytics Is Needed
+
+Use analytical systems for:
+
+- Historical model training
+- Bulk risk analysis
+- Trend reporting
+- Risk-score evaluation
+- Compliance reports
+
+Graph complements SQL and analytics. It does not replace them.
+
+---
+
+# 39. Consistency Decision Framework
+
+Ask:
+
+1. What happens if the user reads stale data?
+2. What happens if a write is lost?
+3. What happens if two users update the same record?
+4. What happens if replicas disagree for five seconds?
+5. Does the data affect money?
+6. Does it affect inventory?
+7. Does it affect security?
+8. Does it affect ownership?
+9. Does it affect legal correctness?
+10. Can the data be regenerated?
+
+## Strong Consistency Usually Needed
+
+- Payments
+- Account balances
+- Inventory during checkout
+- Seat booking
+- Ownership transfer
+- Security permissions
+
+## Eventual Consistency Often Acceptable
+
+- Like counts
+- View counts
+- Comment counts
+- Profile-picture propagation
+- Recommendations
+- Feed ranking
+- Analytics dashboards
+- Viewing history
+
+---
+
+# 40. Common Bottlenecks
+
+## SQL Bottlenecks
+
+- Single-primary write bottleneck
+- Slow joins on large tables
+- Lock contention
+- Connection exhaustion
+- Long-running transactions
+- Schema-migration locks
+- Replication lag
+- Uneven shards
+
+## Document Database Bottlenecks
+
+- Unbounded document growth
+- Huge arrays
+- Missing indexes
+- Expensive cross-document queries
+- Duplicate-data inconsistency
+- Large multi-document transactions
+
+## Key-Value Bottlenecks
+
+- Hot keys
+- Memory pressure
+- Incorrect TTL strategy
+- Expensive scans
+- Missing secondary access paths
+- Poor partition-key distribution
+
+## Column-Family Bottlenecks
+
+- Hot partitions
+- Tombstone accumulation
+- Compaction pressure
+- Poor partition keys
+- Oversized partitions
+- Repair lag
+
+## Graph Database Bottlenecks
+
+- Supernodes
+- Expensive global aggregation
+- High relationship-write volume
+- Cross-partition traversal
+- Graph partitioning complexity
+
+---
+
+# 41. Common Anti-Patterns
+
+Avoid:
+
+1. Choosing NoSQL only because it sounds modern.
+2. Choosing SQL for a massive event stream without a scaling plan.
+3. Using MongoDB without schema discipline.
+4. Creating unbounded arrays inside documents.
+5. Using Redis for permanent cold storage.
+6. Using Cassandra for small applications.
+7. Designing Cassandra tables before understanding queries.
+8. Using a graph database for simple category relationships.
+9. Ignoring consistency requirements.
+10. Using one database for every workload.
+11. Using many databases without a clear need.
+12. Sharding SQL too early.
+13. Designing for theoretical scale instead of real demand.
+14. Ignoring migration cost.
+15. Running analytical reports on a transactional database.
+16. Assuming eventual consistency is acceptable without checking business impact.
+17. Selecting a database the team cannot operate reliably.
+
+---
+
+# 42. Practical Database Selection Process
+
+Use the following sequence:
+
+1. List all entities.
+2. List the main read queries.
+3. List the main write operations.
+4. Identify the read-to-write ratio.
+5. Mark operations requiring ACID.
+6. Mark data that can be eventually consistent.
+7. Identify transaction boundaries.
+8. Determine relationship depth.
+9. Identify nested or hierarchical data.
+10. Determine whether access is mainly by key.
+11. Identify time-series or append-heavy data.
+12. Determine ad hoc reporting requirements.
+13. Estimate data volume and growth.
+14. Estimate latency requirements.
+15. Identify global distribution requirements.
+16. Select the simplest suitable primary database.
+17. Identify genuinely necessary supporting databases.
+18. Add caching if required.
+19. Plan backup and recovery.
+20. Review operational complexity.
+21. Review migration risk.
+22. Validate the decision using actual access patterns.
+
+---
+
+# 43. Important Interview Questions and Answers
+
+## Why are SQL databases still widely used?
+
+SQL databases provide transactions, strong consistency, relationships, constraints, joins, mature tooling and flexible querying. These features remain essential for payments, orders, inventory, billing and many business applications.
+
+---
+
+## Why is horizontal SQL scaling difficult?
+
+Relational databases are designed around transactions and joins. When data is split across machines, joins and transactions may need network coordination across shards, increasing latency and complexity.
+
+---
+
+## What are ACID properties?
+
+~~~text
+Atomicity:
+All operations succeed or all fail.
+
+Consistency:
+Data obeys all constraints and business rules.
+
+Isolation:
+Concurrent transactions do not incorrectly interfere.
+
+Durability:
+Committed data survives failures.
+~~~
+
+---
+
+## Why do ACID guarantees cost performance?
+
+ACID may require:
+
+- Transaction logging
+- Disk writes
+- Replication
+- Locks
+- MVCC
+- Constraint checks
+- Conflict detection
+- Rollback support
+
+These mechanisms improve correctness but use CPU, storage, network and time.
+
+---
+
+## What does NoSQL mean?
+
+NoSQL means “not only SQL.” It refers to non-relational database models optimized for workloads such as flexible documents, key-value access, massive writes or graph traversal.
+
+---
+
+## What is eventual consistency?
+
+Replicas may temporarily contain different values, but they converge over time.
+
+Temporary inconsistency is acceptable only when the business can tolerate stale data.
+
+---
+
+## What are document databases good for?
+
+They are useful for flexible, nested and evolving entities such as product catalogs, profiles, listings and content.
+
+---
+
+## What are key-value stores good for?
+
+They are useful for fast key-based operations such as caching, sessions, shopping carts, counters, rate limiting and leaderboards.
+
+---
+
+## What are column-family stores good for?
+
+They are useful for massive write-heavy workloads with predictable queries, including telemetry, events, logs, viewing history and time-series data.
+
+---
+
+## What are graph databases good for?
+
+They are useful for relationship-heavy workloads such as fraud detection, recommendations, social connections, permissions and pathfinding.
+
+---
+
+## What is polyglot persistence?
+
+Polyglot persistence means using multiple database technologies inside one system so that each workload uses a suitable data model.
+
+---
+
+## Why should database choice follow access patterns?
+
+Every database optimizes certain operations. Knowing how data will be read and written helps select partition keys, indexes, schemas and the correct database model.
+
+---
+
+# 44. Scenario Questions
+
+## A payment system is being designed. Which database should be used?
+
+Use SQL because transactions, strong consistency, durability and auditing are essential. A partial or stale payment result is unacceptable.
+
+---
+
+## A product catalog contains thousands of product types with different attributes. Which database fits?
+
+A document database can fit because product attributes are varied and nested. SQL may still be suitable if the variation is manageable and reporting and relationships are more important.
+
+---
+
+## Billions of sensor readings must be stored per day. Which database fits?
+
+Use a column-family or specialized time-series database with partitioning based on device and time bucket. Store long-term aggregates in a data warehouse.
+
+---
+
+## A profile photo appears stale for a few seconds. Is this acceptable?
+
+It may be acceptable because profile-picture propagation usually does not affect money, security or ownership. Eventual consistency can improve availability and global scalability.
+
+---
+
+## A SQL database is read-heavy and slowing down. What should be done first?
+
+Before migrating to NoSQL:
+
+1. Inspect slow queries.
+2. Add or improve indexes.
+3. Introduce connection pooling.
+4. Add Redis caching.
+5. Add read replicas.
+6. Apply pagination.
+7. Partition large tables.
+8. Archive cold data.
+
+---
+
+## MongoDB documents contain huge arrays and updates are slow. What is wrong?
+
+The design contains unbounded embedded data. Move the growing child objects into a separate collection and reference or query them using an indexed parent ID.
+
+---
+
+## Redis is evicting sessions unexpectedly. What should be checked?
+
+Check:
+
+- Maximum memory
+- Eviction policy
+- TTL values
+- Key sizes
+- Memory fragmentation
+- Traffic spikes
+- Whether cache and session data should use separate Redis instances
+
+---
+
+## Cassandra contains hot partitions. What caused it?
+
+The partition key does not distribute traffic evenly.
+
+Possible solutions:
+
+- Time bucketing
+- Salting
+- Sharding hot keys
+- Changing the partition key
+- Splitting oversized tenants or channels
+
+---
+
+## Fraud analysts need suspicious relationship detection. What database helps?
+
+A graph database helps with multi-hop relationship traversal. SQL is still needed for authoritative transactions, and an analytics platform is still needed for reporting and model training.
+
+---
+
+## Reporting queries slow the transactional database. What should change?
+
+Move analytical workloads to:
+
+- A read replica
+- A reporting database
+- A data warehouse
+- A columnar analytical system
+
+Use change-data capture or ETL/ELT pipelines to transfer data.
+
+---
+
+# 45. Important Trade-Offs
+
+## SQL vs NoSQL
+
+~~~text
+SQL:
+Correctness, joins and query flexibility
+
+NoSQL:
+Scale, availability and specialized access patterns
+~~~
+
+## ACID vs BASE
+
+~~~text
+ACID:
+Stronger immediate correctness
+
+BASE:
+Higher availability with temporary inconsistency
+~~~
+
+## Strong vs Eventual Consistency
+
+~~~text
+Strong consistency:
+Latest correct value, potentially higher latency
+
+Eventual consistency:
+Better availability and scale, but temporary stale data
+~~~
+
+## Document Embedding vs Referencing
+
+~~~text
+Embed:
+Better read locality, but possible growth and duplication
+
+Reference:
+Better sharing and independent updates, but additional queries
+~~~
+
+## Redis vs DynamoDB
+
+~~~text
+Redis:
+In-memory speed layer
+
+DynamoDB:
+Durable high-scale key-value storage
+~~~
+
+## Cassandra vs PostgreSQL
+
+~~~text
+Cassandra:
+Massive distributed writes and known query patterns
+
+PostgreSQL:
+Transactions, joins and flexible queries
+~~~
+
+## Graph Database vs SQL Joins
+
+~~~text
+Graph:
+Deep multi-hop relationship traversal
+
+SQL:
+Structured relationships, reporting and transactional integrity
+~~~
+
+## One Database vs Polyglot Persistence
+
+~~~text
+One database:
+Simpler operation and consistency
+
+Polyglot persistence:
+Better workload fit, but higher complexity
+~~~
+
+## Flexible Schema vs Schema Enforcement
+
+~~~text
+Flexible schema:
+Faster evolution, but more application discipline
+
+Schema enforcement:
+Stronger data quality, but controlled migrations are required
+~~~
+
+## Query Flexibility vs Write Scalability
+
+~~~text
+Flexible queries:
+More indexes and general-purpose structures
+
+Write scalability:
+Fewer indexes and access-pattern-specific models
+~~~
+
+---
+
+# 46. Myth vs Reality
+
+## Myth: SQL cannot scale
+
+Reality:
+
+SQL can scale very far using:
+
+- Indexing
+- Caching
+- Read replicas
+- Partitioning
+- Connection pooling
+- Sharding
+
+However, massive distributed write workloads can reveal its limits.
+
+---
+
+## Myth: NoSQL has no schema
+
+Reality:
+
+NoSQL is schema-flexible, not discipline-free.
+
+Applications still need:
+
+- Validation
+- Naming rules
+- Data types
+- Versioning
+- Migration strategies
+- Index planning
+
+---
+
+## Myth: Eventual consistency is always bad
+
+Reality:
+
+Eventual consistency is useful when the business can tolerate temporary stale data.
+
+It is commonly acceptable for:
+
+- Likes
+- Views
+- Recommendations
+- Analytics
+- Profile-photo propagation
+
+---
+
+## Myth: Redis is only a cache
+
+Reality:
+
+Redis also supports:
+
+- Sessions
+- Counters
+- Leaderboards
+- Rate limiting
+- Locks
+- Streams
+- Pub/sub
+
+---
+
+## Myth: Cassandra is good for every large table
+
+Reality:
+
+Cassandra is suitable when:
+
+- Write throughput is massive.
+- Query patterns are predictable.
+- Horizontal scale is required.
+- The team can manage operational complexity.
+
+---
+
+## Myth: Graph databases are only for social networks
+
+Reality:
+
+They are also useful for:
+
+- Fraud detection
+- Recommendations
+- Permissions
+- Supply chains
+- Network topology
+- Knowledge graphs
+
+---
+
+## Myth: Polyglot persistence is always better architecture
+
+Reality:
+
+Using many databases without a clear requirement creates unnecessary complexity.
+
+---
+
+# 47. Quick Revision Sheet
+
+~~~text
+SQL:
+Best for transactions, relationships, joins, constraints and reports.
+
+ACID:
+Atomicity    → All operations succeed or fail together.
+Consistency  → Data remains valid.
+Isolation    → Concurrent transactions do not interfere incorrectly.
+Durability   → Committed data survives failures.
+
+NoSQL:
+Designed for specialized data models, scale, availability and distribution.
+
+BASE:
+Basically Available
+Soft State
+Eventually Consistent
+
+Document database:
+Best for flexible, nested and evolving entities.
+
+Key-value store:
+Best for fast lookup using a known key.
+
+Column-family store:
+Best for massive writes, time-series data and predictable queries.
+
+Graph database:
+Best for relationship traversal and multi-hop patterns.
+
+Redis:
+Speed layer for cache, sessions, counters and rate limits.
+
+DynamoDB:
+Durable key-value layer for massive predictable scale.
+
+Cassandra:
+Query-first design using partition and clustering keys.
+
+Polyglot persistence:
+Different databases for different workloads.
+
+Core rule:
+Choose based on access patterns, consistency, scale, latency,
+relationships, query flexibility, cost and operational complexity.
+~~~
+
+---
+
+# 48. Top 10 Points to Remember
+
+1. SQL remains the best default for many systems.
+2. ACID is essential where incorrect data causes business damage.
+3. ACID improves correctness but adds performance and scaling costs.
+4. NoSQL is a family of specialized database models.
+5. Eventual consistency is valid only when the business can tolerate stale data.
+6. Document databases fit flexible and nested entities.
+7. Key-value stores fit fast access using a known key.
+8. Column-family stores fit massive write-heavy workloads with known queries.
+9. Graph databases fit relationship-heavy traversal problems.
+10. Database selection must follow access patterns rather than trends.
+
+---
+
+# 49. Self-Test
+
+Try answering these without reading the notes:
+
+1. Why is SQL still important?
+2. When does SQL become difficult to scale?
+3. Explain all four ACID properties.
+4. Why does ACID affect performance?
+5. What is MVCC?
+6. What is a write-ahead log?
+7. What are the common isolation levels?
+8. What does NoSQL mean?
+9. What are BASE properties?
+10. When is eventual consistency acceptable?
+11. What are document databases best for?
+12. When should data be embedded in a document?
+13. When should related data be referenced?
+14. What are key-value stores best for?
+15. What is the difference between Redis and DynamoDB?
+16. How does cache-aside work?
+17. What are column-family databases best for?
+18. What is a Cassandra partition key?
+19. What is a Cassandra clustering key?
+20. What causes hot partitions?
+21. What is a tombstone?
+22. What are graph databases best for?
+23. What are nodes and edges?
+24. What is a graph supernode?
+25. What is polyglot persistence?
+26. Why should access patterns drive database selection?
+27. Which database would you choose for payments?
+28. Which database would you choose for sessions?
+29. Which database would you choose for IoT readings?
+30. Which database would you choose for fraud relationship analysis?
+
+---
+
+# 50. Final Principle
+
+A strong architect does not choose a database because it is popular, modern or used by a large technology company.
+
+A strong architect studies:
+
+- The data
+- The access patterns
+- The transaction boundaries
+- The consistency requirements
+- The read and write volume
+- The relationships
+- The latency target
+- The expected scale
+- The team's operational experience
+- The total cost
+
+Then the architect selects the simplest database architecture that satisfies the real requirements.
+
+The final goal is not:
+
+> SQL versus NoSQL
+
+The final goal is:
+
+> Use the right database model for each workload while controlling correctness, complexity, scalability and cost.
