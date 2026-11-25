@@ -1,0 +1,1716 @@
+# Database Fundamentals Part 2
+
+## 1. CAP Theorem
+
+CAP stands for:
+
+- **Consistency**
+- **Availability**
+- **Partition Tolerance**
+
+### Consistency
+
+Every read receives the latest successfully written value, regardless of which node processes the request.
+
+### Availability
+
+Every request sent to a healthy node receives a response, although the response may contain stale data.
+
+### Partition Tolerance
+
+The system continues operating even when database nodes cannot communicate because of a network failure.
+
+### Main CAP Rule
+
+During a network partition, a distributed system must choose between:
+
+- Preserving consistency
+- Preserving availability
+
+It cannot fully provide both while tolerating the partition.
+
+> CAP trade-offs become important specifically during network partitions.
+
+---
+
+## 2. CAP Trade-Offs
+
+### CP: Consistency + Partition Tolerance
+
+A CP system protects data correctness during a network partition but may reject or delay requests.
+
+Suitable for:
+
+- Banking
+- Payments
+- Stock trading
+- Inventory confirmation
+- Distributed locks
+- Authentication
+- Ownership changes
+
+**Trade-off:** Availability may decrease during failures.
+
+### AP: Availability + Partition Tolerance
+
+An AP system continues accepting requests during a network partition, but users may temporarily receive stale or conflicting data.
+
+Suitable for:
+
+- Social feeds
+- Shopping carts
+- Recommendations
+- Likes and view counts
+- Analytics
+- Logs
+- Telemetry
+
+**Trade-off:** Consistency becomes eventual.
+
+### CA: Consistency + Availability
+
+A CA system provides consistency and availability when there is no network partition.
+
+It is mainly practical in:
+
+- Single-node databases
+- Non-distributed systems
+- Tightly controlled environments
+
+In a real distributed system, partition tolerance normally cannot be ignored.
+
+---
+
+## 3. CAP Decision Framework
+
+Ask these questions for each feature:
+
+1. Can stale data cause financial, legal, security, or trust damage?
+2. Is temporary unavailability worse than stale data?
+3. Can conflicting updates be merged later?
+4. Is the feature correctness-critical?
+5. Does the user need global consistency?
+6. Does the user only need to see their own updates?
+7. Can the operation be processed asynchronously?
+
+Prefer consistency for:
+
+- Payments
+- Billing
+- Inventory reservation
+- Bookings
+- Authentication
+- Ownership changes
+
+Prefer availability for:
+
+- Feeds
+- Likes
+- Recommendations
+- Viewing history
+- Analytics
+- Logs
+
+> Different features in the same system can use different CAP trade-offs.
+
+---
+
+## 4. Consistency Models
+
+From strongest to weakest:
+
+1. Linearizability
+2. Sequential consistency
+3. Causal consistency
+4. Read-your-writes consistency
+5. Monotonic reads
+6. Monotonic writes
+7. Session consistency
+8. Eventual consistency
+9. Weak consistency
+
+> Choose the weakest consistency model that still protects business correctness and user trust.
+
+---
+
+## 5. Strong Consistency
+
+Strong consistency makes a distributed system behave more like a single-machine system.
+
+It usually requires:
+
+- Coordination between nodes
+- Consensus protocols
+- Leader-based writes
+- Replica acknowledgement
+- Quorum reads and writes
+- Distributed locks
+
+### Benefits
+
+- Correct and predictable reads
+- Fewer conflicts
+- Simpler application logic
+- Safer critical workflows
+
+### Costs
+
+- Higher latency
+- Lower throughput
+- More coordination
+- Higher infrastructure cost
+- Lower availability during failures
+- More difficult multi-region writes
+
+Suitable for:
+
+- Bank balances
+- Payment status
+- Seat booking
+- Inventory reservation
+- Authentication
+- Password resets
+- Subscription entitlements
+
+---
+
+## 6. Linearizability
+
+Linearizability is one of the strongest consistency models.
+
+### Guarantee
+
+Once a write completes, every future read must see that write.
+
+Operations appear to occur atomically in real-time order.
+
+### Example
+
+After a bank transfer completes, every server must immediately show the updated balances.
+
+### Cost
+
+Linearizability may require:
+
+- Raft or Paxos-style consensus
+- Majority acknowledgement
+- Leader coordination
+- Cross-node communication
+- Higher latency
+
+Suitable for:
+
+- Money movement
+- Locks
+- Leader election
+- Stock trades
+- Inventory reservation
+- Identity and security operations
+
+---
+
+## 7. Sequential Consistency
+
+Sequential consistency guarantees that all nodes observe operations in the same order.
+
+However, that order does not have to match real-time order.
+
+### Example
+
+If the system decides the operation order is:
+
+1. User A updates a value.
+2. User B reads the value.
+3. User C updates the value.
+
+Every node must observe the same order, even if the actual wall-clock order was different.
+
+---
+
+## 8. Causal Consistency
+
+Causal consistency preserves the order of operations that depend on each other.
+
+Unrelated operations can be processed independently.
+
+### Example
+
+A comment depends on an original post.
+
+Anyone who sees the comment should also see the original post.
+
+Suitable for:
+
+- Social applications
+- Messaging systems
+- Collaborative applications
+- Comments and replies
+
+> Causal consistency preserves meaningful order without coordinating every operation globally.
+
+---
+
+## 9. Monotonic Reads
+
+Monotonic reads ensure that once a user sees a newer value, they never later see an older value.
+
+### Example
+
+After seeing a new profile picture, the user should not see the old profile picture after refreshing the page.
+
+This prevents the application from appearing to move backward in time.
+
+---
+
+## 10. Monotonic Writes
+
+Monotonic writes ensure that writes from the same user are applied in the order they were issued.
+
+### Example
+
+A user performs these actions in a document editor:
+
+1. Adds a paragraph.
+2. Deletes a sentence from that paragraph.
+
+The database must not process the deletion before processing the paragraph addition.
+
+---
+
+## 11. Read-Your-Writes Consistency
+
+Read-your-writes consistency ensures users can immediately see their own updates.
+
+Other users may temporarily see an older version.
+
+### Example
+
+A user uploads a profile photo and immediately sees the new photo.
+
+Other users may see the old photo for a few seconds.
+
+### Implementation Options
+
+- Route reads to the primary after a write
+- Use session affinity
+- Read from the region where the write occurred
+- Store the latest version in the user session
+- Use a write-through cache
+
+Suitable for:
+
+- Profile updates
+- Posts
+- Comments
+- Shopping carts
+- User preferences
+
+---
+
+## 12. Weak Consistency
+
+Weak consistency reduces coordination between nodes.
+
+The system may return:
+
+- Stale data
+- Approximate data
+- Temporarily inconsistent data
+
+### Benefits
+
+- Lower latency
+- Higher availability
+- Better throughput
+- Easier global scaling
+- Lower coordination cost
+
+Suitable for:
+
+- Likes
+- View counts
+- Analytics dashboards
+- Recommendations
+- Social feeds
+- Logs
+- Telemetry
+- A/B testing events
+
+> Weak consistency is a deliberate design decision, not bad engineering.
+
+---
+
+## 13. Eventual Consistency
+
+Eventual consistency means replicas may temporarily contain different values.
+
+If no new updates occur, all replicas eventually converge to the same value.
+
+### Example
+
+A social media post may temporarily show:
+
+- 1,000 likes in one region
+- 1,003 likes in another region
+
+After replication completes, both regions converge.
+
+### Benefits
+
+- High availability
+- High write throughput
+- Global scalability
+- Low coordination overhead
+
+### Challenges
+
+- Stale reads
+- Conflicting writes
+- Temporary user confusion
+- Additional application logic
+
+### Conflict Resolution Strategies
+
+- Last writer wins
+- Custom merge logic
+- Vector clocks
+- Operational transformation
+- Conflict-free Replicated Data Types
+- Background reconciliation
+
+---
+
+## 14. Session Consistency
+
+Session consistency gives a single user session a coherent view of data.
+
+Different sessions may temporarily see different versions.
+
+### Example
+
+During one session, a user should not see half of their profile using old data and the other half using new data.
+
+### Implementation Options
+
+- Session affinity
+- Read from the same replica
+- Version markers in session tokens
+- Route reads to the primary after writes
+
+Suitable for:
+
+- Shopping carts
+- User profiles
+- Dashboards
+- Account settings
+- Collaborative applications
+
+---
+
+## 15. ACID
+
+ACID prioritizes correctness and strict transaction guarantees.
+
+ACID stands for:
+
+- **Atomicity**
+- **Consistency**
+- **Isolation**
+- **Durability**
+
+### Atomicity
+
+A transaction either completes fully or does not happen at all.
+
+Example: During a bank transfer, money must be removed from one account and added to another account. If either operation fails, the complete transaction must roll back.
+
+### Consistency
+
+A transaction moves the database from one valid state to another valid state.
+
+Database rules and constraints must remain satisfied.
+
+### Isolation
+
+Concurrent transactions should not interfere with each other incorrectly.
+
+One transaction should not see another transaction's incomplete changes.
+
+### Durability
+
+Once a transaction is committed, it remains saved even after a crash or restart.
+
+Suitable for:
+
+- Financial transactions
+- Inventory checkout
+- Booking systems
+- Authentication
+- Billing
+- Subscriptions
+- Audit records
+
+---
+
+## 16. BASE
+
+BASE prioritizes availability and scalability.
+
+BASE stands for:
+
+- **Basically Available**
+- **Soft State**
+- **Eventually Consistent**
+
+### Basically Available
+
+The system tries to remain available even during failures.
+
+### Soft State
+
+The system's state may change asynchronously through replication and background processing.
+
+### Eventually Consistent
+
+Replicas eventually converge if no new writes occur.
+
+Suitable for:
+
+- Social feeds
+- Recommendations
+- Likes
+- View counts
+- Analytics
+- Logs
+- Viewing history
+- Telemetry
+
+---
+
+## 17. ACID vs BASE
+
+| Factor | ACID | BASE |
+|---|---|---|
+| Priority | Correctness | Availability and scale |
+| Consistency | Stronger | Eventual |
+| Transactions | Strict | Flexible and asynchronous |
+| Failure behavior | May reject operations | Continues serving requests |
+| Best for | Payments, inventory and bookings | Feeds, analytics and recommendations |
+| Main cost | Coordination and latency | Temporary inconsistency |
+
+### Choose ACID When
+
+- Users can lose money
+- Inventory can be oversold
+- Seats can be double-booked
+- Security state must be correct
+- Legal correctness matters
+- Partial success is unacceptable
+
+### Choose BASE When
+
+- Approximate values are acceptable
+- Temporary inconsistency is acceptable
+- Availability is more important
+- Conflicts can be resolved later
+- Data is derived or replayable
+
+### Hybrid Rule
+
+Use:
+
+- **ACID for the transaction of record**
+- **BASE for experience, discovery, personalization and analytics**
+
+---
+
+## 18. Hybrid Architecture Examples
+
+### E-Commerce
+
+ACID:
+
+- Order creation
+- Payment
+- Inventory reservation
+- Refund processing
+
+BASE:
+
+- Recommendations
+- Recently viewed products
+- Product popularity
+- Analytics
+
+### Ride-Sharing
+
+ACID:
+
+- Payment
+- Driver assignment confirmation
+- Trip completion
+
+BASE:
+
+- Driver location
+- ETA updates
+- Heat maps
+
+### Streaming Platform
+
+ACID:
+
+- Billing
+- Subscription status
+- Account security
+
+BASE:
+
+- Viewing history
+- Recommendations
+- Trending lists
+
+### Social Platform
+
+ACID:
+
+- Account creation
+- Password reset
+- Security events
+
+BASE:
+
+- Likes
+- Feed ranking
+- Notifications
+- View counts
+
+---
+
+## 19. Database Indexing
+
+An index is a separate data structure that helps a database find rows efficiently.
+
+Without an index, the database may scan the complete table.
+
+With an appropriate index, the database can jump directly to a row or a smaller range of rows.
+
+### Indexes Improve
+
+- Filtering
+- Searching
+- Sorting
+- Joins
+- Range queries
+- Uniqueness checks
+
+### Index Costs
+
+- Extra storage
+- Slower inserts
+- Slower updates
+- Slower deletes
+- More memory pressure
+- Maintenance overhead
+
+> Create indexes for real queries, not imagined possibilities.
+
+---
+
+## 20. B-Tree Index
+
+A B-tree is a balanced tree structure that keeps indexed values ordered.
+
+Suitable for:
+
+- Equality lookups
+- Range queries
+- Sorting
+- Ordered scans
+- Prefix searches in some cases
+
+### Equality Query
+
+    SELECT *
+    FROM users
+    WHERE email = 'user@example.com';
+
+### Range Query
+
+    SELECT *
+    FROM orders
+    WHERE order_date BETWEEN '2026-01-01' AND '2026-01-31';
+
+### Range and Sorting
+
+    SELECT *
+    FROM products
+    WHERE price BETWEEN 1000 AND 5000
+    ORDER BY price;
+
+> B-tree indexes are the default workhorse for most relational database queries.
+
+---
+
+## 21. Hash Index
+
+A hash index uses a hash function to map a key to a location.
+
+Suitable for:
+
+- Exact key lookups
+- Equality conditions
+- Key-value access
+
+Example:
+
+    SELECT *
+    FROM users
+    WHERE user_id = 1001;
+
+Hash indexes are not suitable for:
+
+- Range queries
+- Sorting
+- Prefix matching
+- Partial matching
+
+Example of a query that does not suit a hash index:
+
+    SELECT *
+    FROM products
+    WHERE price > 1000;
+
+Use a hash index when the exact key is known. Use a B-tree index when ranges or ordering matter.
+
+---
+
+## 22. Compound Index
+
+A compound index contains multiple columns.
+
+Example:
+
+    CREATE INDEX idx_orders_region_status_date
+    ON orders(region, status, order_date);
+
+It may support:
+
+    SELECT *
+    FROM orders
+    WHERE region = 'South'
+      AND status = 'PAID'
+      AND order_date >= '2026-01-01'
+    ORDER BY order_date;
+
+### Column Order Matters
+
+For this index:
+
+    (region, status, order_date)
+
+It naturally supports queries starting with:
+
+- `region`
+- `region + status`
+- `region + status + order_date`
+
+This is called the **leftmost-prefix principle**.
+
+### Practical Rules
+
+- Match common `WHERE` conditions
+- Consider `ORDER BY`
+- Usually place equality columns before range columns
+- Consider column selectivity
+- Confirm index usage using the execution plan
+- Avoid random compound indexes
+
+---
+
+## 23. Covering Index
+
+A covering index contains all columns required by a query.
+
+The database may answer the query directly from the index without reading the full table row.
+
+Example:
+
+    CREATE INDEX idx_users_city_cover
+    ON users(city)
+    INCLUDE (name, email);
+
+Query:
+
+    SELECT name, email
+    FROM users
+    WHERE city = 'Hyderabad';
+
+### Benefits
+
+- Fewer table reads
+- Lower disk I/O
+- Faster frequent queries
+- Useful for reporting and search pages
+
+### Costs
+
+- Larger index
+- More storage
+- Higher write overhead
+- More memory usage
+
+---
+
+## 24. Partial Index
+
+A partial index contains only rows matching a condition.
+
+Example:
+
+    CREATE INDEX idx_active_users
+    ON users(email)
+    WHERE status = 'ACTIVE';
+
+Suitable for:
+
+- Active users
+- Unpaid invoices
+- Pending jobs
+- Non-deleted records
+- Frequently queried subsets
+
+### Benefits
+
+- Smaller index
+- Lower storage
+- Faster focused queries
+- Less maintenance than a full-table index
+
+Support and syntax depend on the database product.
+
+---
+
+## 25. Unique Index
+
+A unique index prevents duplicate values and improves lookup speed.
+
+Example:
+
+    CREATE UNIQUE INDEX idx_users_email
+    ON users(email);
+
+### Benefits
+
+- Fast lookup
+- Duplicate prevention
+- Data integrity
+
+Common examples:
+
+- Email
+- Username
+- External transaction ID
+- Idempotency key
+
+---
+
+## 26. Index Costs and Maintenance
+
+Every index adds cost.
+
+Costs include:
+
+- Extra disk storage
+- Slower inserts
+- Slower updates
+- Slower deletes
+- Index rebuilds
+- Maintenance overhead
+- Memory pressure
+- Write amplification
+- Fragmentation or bloat
+
+### Common Mistake
+
+Creating an index on every column “just in case.”
+
+### Better Approach
+
+- Index real access patterns
+- Monitor index usage
+- Remove unused indexes
+- Review indexes when features change
+- Avoid duplicate indexes
+- Test write performance
+
+---
+
+## 27. Indexing Decision Framework
+
+Create an index when:
+
+- The query runs frequently
+- The table is large
+- The column is used for filtering
+- The column is used for sorting
+- The column is used in joins
+- Uniqueness must be enforced
+- Query latency matters
+
+Avoid or reconsider an index when:
+
+- The table is small
+- The query rarely runs
+- The column has low selectivity
+- The column changes frequently
+- Writes are already slow
+- Another index already covers the query
+
+> Do not index columns. Index queries.
+
+---
+
+## 28. Query Optimizer
+
+The query optimizer decides how the database should execute a SQL query.
+
+It considers:
+
+- Available indexes
+- Table size
+- Estimated row count
+- Column cardinality
+- Data distribution
+- Join order
+- Join type
+- Sorting cost
+- Filter selectivity
+- Table partitions
+- Available memory
+
+The SQL query describes **what data is required**.
+
+The execution plan describes **how the database retrieves it**.
+
+---
+
+## 29. Execution Plans
+
+An execution plan shows how the database processes a query.
+
+Example:
+
+    EXPLAIN
+    SELECT *
+    FROM orders
+    WHERE customer_id = 1001;
+
+Some databases provide runtime information using:
+
+    EXPLAIN ANALYZE
+    SELECT *
+    FROM orders
+    WHERE customer_id = 1001;
+
+Inspect:
+
+- Sequential scans
+- Full table scans
+- Index scans
+- Index seeks
+- Join types
+- Sort operations
+- Estimated rows
+- Actual rows
+- Filter placement
+- Partition elimination
+- Execution cost
+- Execution time
+
+---
+
+## 30. Sequential Scan
+
+A sequential scan reads the complete table.
+
+Possible reasons:
+
+- Missing index
+- Poor query structure
+- Low-selectivity condition
+- Small table
+- Stale statistics
+- Query returns most rows
+- Function prevents index usage
+
+A sequential scan is not always bad.
+
+It may be efficient when:
+
+- The table is small
+- Most rows are needed
+- The filter has low selectivity
+
+---
+
+## 31. Index Scan or Index Seek
+
+An index scan or seek uses an index to locate matching rows.
+
+Inspect:
+
+- Number of rows returned
+- Number of index entries scanned
+- Number of table lookups
+- Estimated cost
+- Actual execution time
+- Filter selectivity
+
+> Using an index does not automatically mean a query is optimized.
+
+---
+
+## 32. Estimated Rows vs Actual Rows
+
+The optimizer predicts how many rows each operation will produce.
+
+A large difference between estimated and actual rows may indicate:
+
+- Stale statistics
+- Skewed data
+- Correlated columns
+- Poor cardinality estimation
+- Parameter-sensitive execution plans
+
+Incorrect estimates can cause:
+
+- Wrong join type
+- Wrong join order
+- Unnecessary sorting
+- Scan instead of seek
+- Insufficient memory allocation
+
+---
+
+## 33. Join Types
+
+### Nested Loop Join
+
+Useful when:
+
+- One input is small
+- The other table has an efficient index
+
+It becomes expensive when the outer input contains many rows.
+
+### Hash Join
+
+Useful for:
+
+- Large unsorted inputs
+- Equality joins
+- Cases without a useful ordered index
+
+It may require significant memory.
+
+### Merge Join
+
+Useful when:
+
+- Both inputs are sorted
+- The join uses ordered keys
+- Large datasets are joined
+
+The best join depends on input size, indexes, memory, and data distribution.
+
+---
+
+## 34. Common Query Optimization Problems
+
+### Missing Index
+
+The database scans too many rows because no useful index exists.
+
+### Wrong Index
+
+An index exists, but its columns or column order do not match the query.
+
+### Low-Selectivity Index
+
+An index may not help when many rows contain the same value.
+
+Example:
+
+    WHERE is_active = true
+
+If almost every row is active, a full table scan may be more efficient.
+
+### Function on an Indexed Column
+
+Example:
+
+    WHERE UPPER(name) = 'JOHN'
+
+A normal index on `name` may not be used efficiently.
+
+Possible solutions:
+
+- Store a normalized value
+- Create a functional index if supported
+
+### Correlated Subquery
+
+A subquery may execute repeatedly for every outer row.
+
+Possible solutions:
+
+- Replace it with a join
+- Pre-aggregate data
+- Use an appropriate Common Table Expression
+
+### Stale Statistics
+
+Old statistics may cause incorrect estimates and poor execution plans.
+
+### Large Sort
+
+The database may sort too many rows because filtering happens late or no useful ordered index exists.
+
+### Missing Partition Elimination
+
+The query scans partitions that cannot contain matching data.
+
+---
+
+## 35. N+1 Query Problem
+
+The N+1 problem occurs when an application:
+
+1. Runs one query to load a list.
+2. Runs one additional query for every item.
+
+### Example
+
+    1 query to load 100 posts
+    100 queries to load each post's author
+    Total = 101 queries
+
+### Why It Is Expensive
+
+- Too many database round trips
+- Repeated network latency
+- Increased database CPU usage
+- Poor connection-pool usage
+- Performance gets worse as the list grows
+
+### Solutions
+
+- Use joins
+- Use batch fetching
+- Use projection queries
+- Use controlled eager loading
+- Fetch related data in fewer queries
+- Use caching where appropriate
+
+### Better Query
+
+    SELECT
+        p.id,
+        p.content,
+        u.id,
+        u.name
+    FROM posts p
+    JOIN users u
+        ON u.id = p.author_id;
+
+In Spring Data JPA or Hibernate, possible solutions include:
+
+- `JOIN FETCH`
+- Entity graphs
+- DTO projections
+- Batch fetching
+- Generated SQL inspection
+
+---
+
+## 36. Query Rewriting
+
+Query rewriting changes SQL structure so the optimizer can execute it more efficiently.
+
+Useful techniques:
+
+- Filter rows earlier
+- Select only required columns
+- Avoid unnecessary `DISTINCT`
+- Avoid functions on indexed columns
+- Replace repeated correlated subqueries
+- Avoid sorting huge intermediate results
+- Match `WHERE` and `ORDER BY` with indexes
+- Use computed or functional indexes when supported
+
+Avoid:
+
+    SELECT *
+    FROM users
+    WHERE UPPER(name) = 'JOHN';
+
+Possible improvement:
+
+    SELECT id, name, email
+    FROM users
+    WHERE normalized_name = 'john';
+
+Create an index:
+
+    CREATE INDEX idx_users_normalized_name
+    ON users(normalized_name);
+
+---
+
+## 37. Parameter Sniffing
+
+Parameter sniffing happens when a database caches an execution plan optimized for one parameter value and reuses it for very different values.
+
+### Example
+
+A query is first compiled for a customer with 10 orders.
+
+The same plan is later reused for an enterprise customer with 10 million orders.
+
+### Symptoms
+
+- Same query is fast for some users
+- Same query is slow for other users
+- Performance changes depending on parameters
+- Cached plan performs poorly for skewed data
+
+### Possible Solutions
+
+- Update statistics
+- Recompile selected queries when justified
+- Use different query paths for large tenants
+- Avoid overly generic queries for highly skewed data
+- Use database-specific hints carefully
+- Investigate parameter-sensitive execution plans
+
+---
+
+## 38. Table Partitioning
+
+Partitioning divides a large table into smaller physical sections.
+
+Common partition keys:
+
+- Date
+- Tenant ID
+- Region
+- Customer ID
+- Category
+
+### Example
+
+An orders table is partitioned by month.
+
+A query for the current month should scan only the current month's partition.
+
+### Partition Elimination
+
+Partition elimination means the optimizer skips partitions that cannot contain matching rows.
+
+### Benefits
+
+- Reduced scan cost
+- Faster time-based queries
+- Easier archival
+- Easier maintenance
+- Faster deletion of old data in some designs
+
+### Risks
+
+- Wrong partition key
+- Too many partitions
+- Queries missing the partition key
+- Uneven partition sizes
+- Increased operational complexity
+
+Use partitioning when common queries naturally filter by the partition key.
+
+---
+
+## 39. Query Optimization Process
+
+1. Identify the slow query.
+2. Measure its latency.
+3. Measure how frequently it runs.
+4. Capture its execution plan.
+5. Check for full table scans.
+6. Check index usage.
+7. Compare estimated rows with actual rows.
+8. Check statistics freshness.
+9. Inspect join order.
+10. Inspect join type.
+11. Inspect sorting and grouping.
+12. Check application code for N+1 queries.
+13. Rewrite the query if necessary.
+14. Add or modify indexes only when justified.
+15. Consider partitioning for large tables.
+16. Consider caching for repeated reads.
+17. Consider read replicas for read-heavy workloads.
+18. Retest using production-like data.
+19. Monitor performance after deployment.
+
+> Query optimization starts with measurement, not guessing.
+
+---
+
+## 40. Large Orders Table Example
+
+Assume an `orders` table contains 100 million rows.
+
+The query filters by:
+
+- Customer region
+- Order status
+- Date range
+
+It also sorts by order date.
+
+    SELECT
+        order_id,
+        customer_id,
+        status,
+        order_date,
+        total_amount
+    FROM orders
+    WHERE customer_region = 'South'
+      AND status = 'PAID'
+      AND order_date >= '2026-01-01'
+      AND order_date < '2026-02-01'
+    ORDER BY order_date DESC;
+
+### Step 1: Inspect the Execution Plan
+
+Check:
+
+- Full scan vs index access
+- Estimated rows vs actual rows
+- Rows removed by filters
+- Sort cost
+- Disk spills
+- Partition elimination
+- Total execution time
+
+### Step 2: Consider a Compound Index
+
+    CREATE INDEX idx_orders_region_status_date
+    ON orders(customer_region, status, order_date DESC);
+
+This may help because:
+
+- `customer_region` uses equality
+- `status` uses equality
+- `order_date` uses a range and sorting
+
+The best order depends on:
+
+- Data selectivity
+- Query frequency
+- Other query patterns
+- Database engine behavior
+
+### Step 3: Consider a Covering Index
+
+    CREATE INDEX idx_orders_region_status_date_cover
+    ON orders(customer_region, status, order_date DESC)
+    INCLUDE (order_id, customer_id, total_amount);
+
+### Step 4: Consider Date Partitioning
+
+If most queries use date ranges, monthly partitioning may provide partition elimination.
+
+### Step 5: Evaluate Write Cost
+
+The new index increases:
+
+- Insert cost
+- Update cost
+- Storage
+- Memory usage
+- Maintenance work
+
+### Step 6: Avoid Over-Indexing
+
+Before creating the index:
+
+- Check whether an existing index covers the query
+- Confirm the query runs frequently
+- Test using production-like data
+- Monitor index usage after deployment
+- Remove redundant indexes safely
+
+---
+
+## 41. Practical Scenario Mapping
+
+| Feature | Recommended Model |
+|---|---|
+| Bank transfer | Strong consistency and ACID |
+| Payment processing | Strong consistency and ACID |
+| Inventory confirmation | Strong consistency and ACID |
+| Shopping cart | Session consistency, stronger at checkout |
+| Social media like count | Eventual or weak consistency |
+| User profile update | Read-your-writes for the owner |
+| Social feed | Eventual consistency |
+| Comments and replies | Causal consistency |
+| Product catalog | Eventual consistency and caching |
+| Account security event | Strong consistency |
+| Analytics dashboard | Weak or eventual consistency |
+| Viewing history | Eventual consistency |
+| Recommendations | Eventual consistency |
+
+---
+
+## 42. E-Commerce Design
+
+### Product Browsing
+
+Use eventual consistency and caching.
+
+Temporary stale descriptions or images are normally acceptable.
+
+### Shopping Cart
+
+Use session consistency or read-your-writes consistency.
+
+The user should immediately see their cart changes.
+
+### Checkout Inventory
+
+Use strong consistency and ACID transactions.
+
+The system must prevent overselling.
+
+### Payment Processing
+
+Use:
+
+- Strong consistency
+- ACID transactions
+- Idempotency keys
+- Durable transaction records
+
+### Recommendations
+
+Use eventual consistency because recommendations can be generated asynchronously.
+
+### Analytics
+
+Use weak or eventual consistency because small delays normally do not affect correctness.
+
+### Recently Viewed Products
+
+Use eventual consistency because this data is non-critical and replayable.
+
+---
+
+## 43. Social Media Design
+
+### Post Creation
+
+Use read-your-writes so the author immediately sees the new post.
+
+Feed propagation can remain eventually consistent.
+
+### Like Counts
+
+Use eventual or weak consistency because temporary differences are acceptable.
+
+### Comment Ordering
+
+Use causal consistency when comments and replies depend on earlier content.
+
+### Profile Updates
+
+Use read-your-writes for the owner and eventual consistency for other viewers.
+
+### Feed Generation
+
+Use eventual consistency because availability, latency, and global scale are more important than exact immediate updates.
+
+### Account Security Events
+
+Use strong consistency because stale security data creates serious risk.
+
+---
+
+## 44. Common Misunderstandings
+
+### “CAP means choosing two properties forever.”
+
+Incorrect. CAP trade-offs matter specifically during network partitions.
+
+### “Availability means the response is correct.”
+
+Incorrect. Availability means the system responds. The response may be stale.
+
+### “Strong consistency should be used everywhere.”
+
+Incorrect. Strong consistency increases coordination, latency, cost, and failure sensitivity.
+
+### “Eventual consistency means data takes a long time to update.”
+
+Incorrect. Convergence may happen in milliseconds or seconds.
+
+### “Weak consistency is bad engineering.”
+
+Incorrect. It is appropriate when exact values are unnecessary.
+
+### “Indexes always improve performance.”
+
+Incorrect. Indexes improve selected reads but increase write and storage costs.
+
+### “A full table scan is always bad.”
+
+Incorrect. A scan may be efficient for small tables or low-selectivity queries.
+
+### “If a query uses an index, it is optimized.”
+
+Incorrect. The index may still scan many entries or perform expensive table lookups.
+
+### “ORM-generated queries are automatically efficient.”
+
+Incorrect. ORMs can generate N+1 queries, unnecessary joins, and excessive column retrieval.
+
+---
+
+## 45. Red Flags
+
+Avoid:
+
+- Strong consistency everywhere without justification
+- Eventual consistency for money or security state
+- Treating CAP as a permanent database label
+- Indexing every column
+- Ignoring index write overhead
+- Keeping unused indexes
+- Optimizing without an execution plan
+- Blindly trusting ORM-generated SQL
+- Allowing N+1 queries on hot paths
+- Running heavy analytics on an overloaded OLTP database
+- Ignoring stale statistics
+- Overusing query hints
+- Choosing a partition key unrelated to query patterns
+
+---
+
+## 46. Interview Questions and Answers
+
+### What is the CAP theorem?
+
+During a network partition, a distributed system must choose between consistency and availability while tolerating the partition.
+
+### What does consistency mean in CAP?
+
+Every read receives the latest successful write.
+
+### What does availability mean in CAP?
+
+Every request to a healthy node receives a response, although the response may be stale.
+
+### What is partition tolerance?
+
+The system continues operating when nodes cannot communicate.
+
+### What is linearizability?
+
+Once a write completes, every later read must observe that write in real-time order.
+
+### What is sequential consistency?
+
+All nodes observe operations in the same order, but the order does not have to match real-time order.
+
+### What is causal consistency?
+
+Causally related operations are observed in their correct dependency order.
+
+### What is read-your-writes consistency?
+
+A user can immediately read data that they have successfully written.
+
+### What are monotonic reads?
+
+Once a user sees a newer value, they never later see an older value.
+
+### What are monotonic writes?
+
+Writes from the same user are applied in the order they were issued.
+
+### What is eventual consistency?
+
+Replicas may temporarily differ but eventually converge.
+
+### What is session consistency?
+
+One user session receives a coherent view, although other sessions may see different versions.
+
+### What is the difference between ACID and BASE?
+
+ACID prioritizes correctness and strict transactions. BASE prioritizes availability, scalability, and eventual convergence.
+
+### What is a B-tree index?
+
+A balanced and ordered index structure useful for equality, range, sorting, and ordered scans.
+
+### What is a hash index?
+
+An index optimized mainly for exact equality lookups.
+
+### What is a compound index?
+
+An index containing multiple columns where column order affects query support.
+
+### What is a covering index?
+
+An index containing all columns required to answer a query without reading the main table.
+
+### What is a partial index?
+
+An index containing only rows that satisfy a condition.
+
+### What is an execution plan?
+
+The database optimizer's chosen strategy for scanning, filtering, joining, sorting, and returning data.
+
+### What is the N+1 problem?
+
+One query loads a list and then one additional query runs for every item.
+
+### What is parameter sniffing?
+
+A cached plan optimized for one parameter value performs poorly for different parameter values.
+
+### What is partition elimination?
+
+The optimizer skips table partitions that cannot contain matching rows.
+
+---
+
+## 47. Scenario Questions
+
+### A payment system must remain correct during a network partition. What should it choose?
+
+Choose a CP-style trade-off for the critical operation. Reject or delay requests if correctness cannot be guaranteed.
+
+### A social feed must stay globally available. What fits?
+
+Use an AP-oriented design with eventual consistency.
+
+### A user cannot see their own profile update. What guarantee is missing?
+
+Read-your-writes consistency.
+
+### Like counts differ between regions for a few seconds. Is that acceptable?
+
+Usually yes, because like counts commonly use eventual consistency.
+
+### A shopping cart is slightly stale. What should happen at checkout?
+
+Revalidate:
+
+- Prices
+- Inventory
+- Discounts
+- Product availability
+
+Use strongly consistent or transactional operations during final checkout.
+
+### A query scans 50 million rows. What should be checked first?
+
+Capture the execution plan and determine why a scan was selected before adding an index.
+
+### A table has many indexes and writes are slow. What may be wrong?
+
+Every insert, update, and delete is maintaining too many index structures.
+
+### A query is fast for small customers but slow for large customers. What may be happening?
+
+Data skew or parameter sniffing may be causing an unsuitable cached plan.
+
+### An ORM executes 101 queries for one page. What is the problem?
+
+The N+1 query problem.
+
+### Dashboard queries slow down the transactional database. What can help?
+
+Move analytical workloads to:
+
+- A read replica
+- A reporting database
+- A data warehouse
+- A dedicated analytical system
+
+---
+
+## 48. Quick Revision
+
+- CAP trade-offs matter during network partitions.
+- During a partition, systems usually choose consistency or availability.
+- Linearizability is strong but expensive.
+- Sequential consistency preserves a shared order.
+- Causal consistency preserves cause-and-effect order.
+- Read-your-writes allows users to see their own changes.
+- Monotonic reads prevent users from moving backward to older values.
+- Eventual consistency improves availability and scalability.
+- ACID protects correctness-critical workflows.
+- BASE supports highly available distributed workloads.
+- Modern systems commonly use both ACID and BASE.
+- B-tree indexes support equality, range, and sorting.
+- Hash indexes mainly support exact matches.
+- Compound index column order matters.
+- Covering indexes reduce table reads.
+- Partial indexes reduce index size for focused subsets.
+- Every index increases write and storage costs.
+- Execution plans reveal actual database behavior.
+- N+1 queries create excessive database round trips.
+- Stale statistics can produce poor execution plans.
+- Partition elimination reduces unnecessary scanning.
+- Query optimization begins with measurement.
+
+---
+
+## 49. Top 10 Points to Remember
+
+1. CAP trade-offs become important during network partitions.
+2. Strong consistency improves correctness but increases coordination cost.
+3. Linearizability should be reserved for workflows that truly require it.
+4. Eventual consistency is suitable for high-scale experience features.
+5. Read-your-writes consistency protects user trust.
+6. ACID and BASE can exist in the same architecture.
+7. Indexes improve reads but slow writes.
+8. B-tree indexes support most common relational query patterns.
+9. Execution plans show what the database actually does.
+10. N+1 queries, stale statistics, and poor indexing can quietly destroy performance.
+
+---
+
+## 50. Final Mental Model
+
+A database architect should not ask:
+
+- Which consistency model is always best?
+- Which database is always best?
+- How many indexes can be created?
+
+Instead, ask:
+
+- What business damage can stale data cause?
+- What business damage can unavailability cause?
+- What consistency level does this feature require?
+- Can the data be processed asynchronously?
+- What are the real read patterns?
+- What are the real write patterns?
+- What does the execution plan show?
+- Is an index worth its write and storage cost?
+
+> Database architecture means matching consistency guarantees, transaction models, access patterns, indexes, and execution strategies to the real business problem.
