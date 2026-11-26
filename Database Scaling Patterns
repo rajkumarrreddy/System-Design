@@ -1,0 +1,2007 @@
+# Database Scaling Patterns
+
+## 1. Purpose
+
+Database scaling patterns help an application handle growth in:
+
+- Read traffic
+- Write traffic
+- Data volume
+- Geographic reach
+- Availability requirements
+
+The objective is to:
+
+1. Identify the actual database bottleneck.
+2. Select the simplest pattern that solves it.
+3. Understand the problems introduced by that pattern.
+4. Design routing, consistency, migration, monitoring, and failure handling.
+
+> **Core principle:** Scale the proven bottleneck using the simplest suitable pattern.
+
+---
+
+# 2. Database Scaling Ladder
+
+A practical order for scaling a database is:
+
+1. Optimize queries.
+2. Add appropriate indexes.
+3. Increase the resources of the existing server.
+4. Cache frequently requested data.
+5. Add read replicas when reads dominate.
+6. Manage replication lag.
+7. Federate databases by business capability.
+8. Denormalize selected read-heavy paths.
+9. Shard when one database cannot handle the write load or data volume.
+10. Use consistent hashing when nodes must be added or removed frequently.
+11. Use multiple writable databases only when global write latency or availability justifies conflict-management complexity.
+
+> **Architect rule:** Introduce scaling patterns in response to measured constraints, not because they appear advanced.
+
+---
+
+# 3. Replication vs Sharding
+
+| Replication | Sharding |
+|---|---|
+| Copies the same dataset to multiple databases | Divides one dataset across multiple databases |
+| Primarily scales reads and availability | Scales storage and write capacity |
+| Replicas contain copies of the master data | Each shard contains only part of the data |
+| Writes may still go through one master | Writes are distributed across shards |
+| Main challenge is replication lag | Main challenges are routing and cross-shard operations |
+
+> Replication copies data. Sharding divides data.
+
+---
+
+# 4. Master-Slave Replication
+
+## Definition
+
+Master-slave replication uses:
+
+- One master database for writes
+- One or more read replicas for reads
+
+```text
+INSERT / UPDATE / DELETE
+            |
+            v
+     Master Database
+            |
+       Replication
+        /       \
+       v         v
+  Replica 1   Replica 2
+       ^         ^
+       |         |
+     SELECT    SELECT
+```
+
+## Routing Rules
+
+### Operations sent to the master
+
+- `INSERT`
+- `UPDATE`
+- `DELETE`
+- Reads that require the newest committed state
+
+### Operations sent to replicas
+
+- Product browsing
+- Feed loading
+- Profile viewing
+- Comment reading
+- Article reading
+- Search results
+- Historical data
+
+## Why It Works
+
+Many web applications are read-heavy.
+
+A typical workload may contain:
+
+```text
+80%–90% reads
+10%–20% writes
+```
+
+Read replicas remove much of the read pressure from the master.
+
+## Benefits
+
+- Increased read capacity
+- Better geographic read latency
+- Improved read availability
+- Reduced load on the master
+- Simpler than sharding
+
+## Limitations
+
+- The master remains the write bottleneck.
+- Replicas may return stale data.
+- Master failure requires failover or replica promotion.
+- The application must route operations correctly.
+- Replicas may become overloaded or fall behind.
+
+> **Important:** Read replicas scale reads, not writes.
+
+---
+
+# 5. Read and Write Routing
+
+## Read Routing
+
+`SELECT` queries can be:
+
+- Distributed among healthy replicas
+- Sent to a nearby geographic replica
+- Balanced using a database proxy or connection layer
+- Sent to the master when current state is required
+
+## Write Routing
+
+The following operations go to the master:
+
+- `INSERT`
+- `UPDATE`
+- `DELETE`
+
+## Implementation Approaches
+
+- Framework-provided routing
+- Separate read and write connection pools
+- Database connection wrappers
+- Routing based on SQL operation type
+- Database proxies
+
+## Warning
+
+A rule such as:
+
+```text
+All SELECT statements go to replicas
+```
+
+is unsafe because some `SELECT` operations require the newest state.
+
+---
+
+# 6. Asynchronous Replication
+
+## Flow
+
+1. The client sends a write to the master.
+2. The master commits the write.
+3. The master responds to the client.
+4. The change is propagated to replicas afterward.
+
+```text
+Client
+   |
+   | Write
+   v
+Master commits
+   |
+   | Success response
+   v
+Client
+
+Master
+   |
+   | Replicate later
+   v
+Replica
+```
+
+## Benefits
+
+- Low write latency
+- High write throughput
+- No replica round trip in the main write path
+- Lower coordination overhead
+
+## Costs
+
+- Replicas may temporarily return older data.
+- A failed master may contain writes not yet copied to replicas.
+- Users may observe eventual consistency.
+
+> Asynchronous replication is the reason replicas scale efficiently and the reason replication lag must be managed.
+
+---
+
+# 7. Replication Lag
+
+## Definition
+
+Replication lag is the delay between:
+
+```text
+A write being committed on the master
+                    ↓
+The write becoming readable on a replica
+```
+
+## Causes
+
+- Heavy write traffic
+- Slow replica processing
+- Network latency
+- Network failures
+- Geographic distance
+- Replica CPU pressure
+- Memory pressure
+- Disk pressure
+- Long-running queries
+
+## User-Visible Problems
+
+- A new post disappears after refresh.
+- A profile update appears unsuccessful.
+- A published article is temporarily missing.
+- A user sees a newer value and later sees an older value.
+- One region continues displaying old information.
+
+> The database can be technically correct while the application still feels broken.
+
+---
+
+# 8. Read-Your-Writes Consistency
+
+## Guarantee
+
+After a user writes data, that user can immediately read the new value.
+
+Other users may temporarily continue reading older data from replicas.
+
+## Typical Flow
+
+```text
+User writes data
+      |
+      v
+Write goes to master
+      |
+      v
+User temporarily reads from master
+or a caught-up replica
+      |
+      v
+Replicas catch up
+      |
+      v
+User returns to normal replica reads
+```
+
+## Tracking Options
+
+- Session cookie
+- Browser local storage
+- Server-side session
+- Recent-write timestamp
+- Database replication position
+
+## Suitable Use Cases
+
+- Profile changes
+- New posts
+- Published articles
+- Listing updates
+- User-generated content
+
+> Read-your-writes protects the writer without requiring global strong consistency.
+
+---
+
+# 9. Monotonic Reads
+
+## Guarantee
+
+Once a user sees version `N`, the user should not later see version `N - 1`.
+
+## Problem Example
+
+```text
+Request 1 → Current replica → Version 10
+Request 2 → Lagging replica → Version 8
+```
+
+The user appears to move backward in time.
+
+## Sticky-Session Solution
+
+Keep the user on the same replica for a period of time.
+
+### Advantage
+
+The user receives a consistent progression.
+
+### Limitation
+
+The selected replica may still be behind the master.
+
+> Monotonic reads prevent moving backward. They do not guarantee the latest global data.
+
+---
+
+# 10. Timestamp-Based Replica Routing
+
+## Core Idea
+
+Each write receives a timestamp or replication position.
+
+A replica can serve the user’s next read only after it has caught up to that position.
+
+## Routing Flow
+
+1. Store the position of the user’s latest write.
+2. Check candidate replicas’ replication positions.
+3. Use a replica that has caught up.
+4. Fall back to the master if no replica is current enough.
+
+## Benefits
+
+- Better than waiting for a fixed duration
+- Returns users to replicas as soon as possible
+- Uses actual replication progress
+- Reduces unnecessary master reads
+
+## Costs
+
+- The routing layer must know replica progress.
+- The application must track user or session write positions.
+
+---
+
+# 11. Synchronous Replication
+
+## Definition
+
+The master waits for one or more replica acknowledgements before confirming the write.
+
+## Benefits
+
+- The write exists in multiple locations before success is returned.
+- Lower chance of losing an acknowledged write
+- Stronger consistency
+- Stronger durability
+
+## Costs
+
+- Higher write latency
+- Lower throughput
+- Greater sensitivity to network delay
+- Greater sensitivity to slow replicas
+
+## Selective Use
+
+Use synchronous replication for:
+
+- Account balances
+- Payment state
+- Critical entitlements
+- Inventory reservations
+- Financial records
+
+Use asynchronous replication for:
+
+- Activity feeds
+- History pages
+- Analytics events
+- Non-critical content
+- User activity logs
+
+> Match the replication guarantee to the consequence of stale or lost data.
+
+---
+
+# 12. Cache-Based Lag Mitigation
+
+A short-lived cache can protect recently written display data.
+
+## Flow
+
+1. Write authoritative data to the master.
+2. Place the new value in Redis or another cache.
+3. Give the cache entry a short TTL.
+4. Check the cache before reading from a replica.
+5. Let the entry expire after replicas are expected to catch up.
+
+## Suitable Examples
+
+- Newly published articles
+- Recently updated profiles
+- Fresh user-generated content
+- Recently changed product information
+
+## User Messaging
+
+The application can display:
+
+- `Processing`
+- `Publishing`
+- `Updating`
+- `Your changes may take a few seconds to appear`
+
+> Some consistency problems are handled through routing. Others are handled through clear product design.
+
+---
+
+# 13. Replication Monitoring
+
+Monitor:
+
+- Replication lag for every replica
+- Worst-case lag
+- Average lag
+- Replica query latency
+- Replica health
+- Master write throughput
+- Read distribution
+- Replication positions
+- Whether lag increases over time
+
+## Warning Signs
+
+- One replica receives disproportionate traffic.
+- Replicas progressively fall behind.
+- The master remains overloaded after read offloading.
+- Replica failures concentrate reads on fewer nodes.
+- Write traffic exceeds replica replay capacity.
+
+> A replica that exists but cannot keep up is not usable read capacity.
+
+---
+
+# 14. Master-Master Replication
+
+## Definition
+
+Master-master replication allows two or more databases to accept writes and synchronize changes.
+
+```text
+Region A                         Region B
+
+Users                             Users
+  |                                 |
+  v                                 v
+Master A  <---- Replication ----> Master B
+```
+
+## Benefits
+
+- Active-active writes
+- Lower regional write latency
+- Improved write availability
+- Reduced dependence on one write location
+
+## Main Challenge
+
+Two masters may accept incompatible updates before synchronization.
+
+This creates write conflicts.
+
+> Master-master removes one write authority but introduces conflict-management complexity.
+
+---
+
+# 15. Write Conflicts
+
+## Airline Seat Example
+
+1. New York reads that one seat remains.
+2. London reads the same state.
+3. New York confirms a booking.
+4. London also confirms a booking.
+5. Replication later reveals that the seat was sold twice.
+
+## Conflict Categories
+
+- Two updates modify the same field.
+- Two users claim one limited resource.
+- Two masters generate the same identifier.
+- One update depends on state changed elsewhere.
+- Operations arrive in different orders.
+
+> Conflict is expected in active-active systems and must have a defined outcome.
+
+---
+
+# 16. Last-Writer-Wins
+
+## Rule
+
+Compare update timestamps and keep the latest update.
+
+## Advantages
+
+- Simple
+- Fast
+- Automatically convergent
+- Easy to implement
+
+## Risks
+
+- Valid user intent may disappear.
+- Clock differences may affect ordering.
+- The latest update may not be the correct update.
+- A meaningful earlier update may be silently discarded.
+
+## Poor Fits
+
+- Money
+- Seat allocation
+- Inventory reservation
+- Financial transactions
+- Irreplaceable user input
+
+> Last-writer-wins resolves state but does not preserve intent.
+
+---
+
+# 17. Application-Level Conflict Resolution
+
+Business logic decides how to combine conflicting updates.
+
+## Shopping Cart Example
+
+If two regions add different products to the same cart, merge both additions instead of deleting one.
+
+## Possible Outcomes
+
+- Merge both changes
+- Reject one change
+- Ask the user to resolve the conflict
+- Use a single authority for a scarce resource
+- Create a compensating transaction
+
+## Benefits
+
+- Preserves business meaning
+- Supports different policies for different data types
+
+## Costs
+
+- More application logic
+- More test cases
+- Longer convergence time
+- More operational complexity
+
+> Databases can detect conflicts, but domain logic decides what the conflict means.
+
+---
+
+# 18. Vector Clocks
+
+Vector clocks help distinguish:
+
+- An update that happened after another update
+- Two updates that happened concurrently
+
+If one version includes knowledge of another version, it can supersede it.
+
+If neither version includes the other, the updates are concurrent and require conflict resolution.
+
+## Costs
+
+- Additional metadata
+- More complex comparison logic
+- More complicated conflict handling
+
+> Vector clocks detect concurrency, but business logic must still resolve it.
+
+---
+
+# 19. Identifier Conflict Prevention
+
+Multiple masters should not independently generate colliding IDs.
+
+## Possible Solutions
+
+- UUIDs
+- Region-prefixed identifiers
+- Snowflake-style IDs
+- Separate numeric ranges
+- Odd IDs in one region
+- Even IDs in another region
+
+Example:
+
+```text
+Master A → 1, 3, 5, 7, 9
+Master B → 2, 4, 6, 8, 10
+```
+
+> Preventing conflicts is often safer than resolving them afterward.
+
+---
+
+# 20. Split Brain
+
+Split brain occurs when separated parts of a cluster both act as authoritative.
+
+## Example
+
+1. A network partition separates two masters.
+2. Both continue accepting writes.
+3. Both make ownership decisions independently.
+4. The connection is restored.
+5. Conflicting state must be reconciled.
+
+## Protection
+
+- Quorum or majority rules
+- Clear ownership boundaries
+- Leader election
+- Fencing
+- Restricted writes during partitions
+- Defined authority for every data type
+
+> High availability does not simply mean keeping both sides writable.
+
+---
+
+# 21. When to Use Master-Master
+
+## Use It When
+
+- Global write latency is a real requirement.
+- Multiple regions must continue accepting writes.
+- Most writes affect independent records.
+- Conflicts can be safely merged, rejected, or compensated.
+- The team can operate conflict-resolution logic.
+
+## Avoid It When
+
+- The workload is mainly read-heavy.
+- One master with replicas is sufficient.
+- Conflicts could destroy important information.
+- The system handles scarce resources without a safe ownership model.
+- The team cannot explain every conflict outcome.
+
+---
+
+# 22. Database Sharding
+
+## Definition
+
+Sharding divides one logical dataset across multiple independent databases.
+
+```text
+Logical Users Table
+        |
+        +---- Users 1–1M ------> Shard A
+        |
+        +---- Users 1M–2M -----> Shard B
+        |
+        +---- Users 2M–3M -----> Shard C
+```
+
+## What Sharding Scales
+
+- Total storage
+- Write throughput
+- Read throughput for shard-local requests
+- CPU capacity
+- Memory capacity
+- Disk capacity
+
+## What Sharding Introduces
+
+- Shard routing
+- Cross-shard operations
+- Distributed transactions
+- Difficult joins
+- Rebalancing
+- More complex backups
+- Coordinated schema migrations
+- Operational overhead
+
+---
+
+# 23. Vertical Partitioning vs Horizontal Sharding
+
+## Vertical Partitioning
+
+Split business functions into separate databases.
+
+Example:
+
+```text
+Accounts Database
+Orders Database
+Catalog Database
+Payments Database
+```
+
+Question answered:
+
+> What function owns this data?
+
+## Horizontal Sharding
+
+Split rows of the same logical table across multiple databases.
+
+Example:
+
+```text
+Users 1–1,000,000           → Shard A
+Users 1,000,001–2,000,000   → Shard B
+Users 2,000,001–3,000,000   → Shard C
+```
+
+Question answered:
+
+> Which partition owns this row?
+
+> Vertical separation is often simpler and should usually be considered before horizontal sharding.
+
+---
+
+# 24. Shard Routing
+
+## Routing Flow
+
+1. Receive the request and shard key.
+2. Apply the shard-mapping rule.
+3. Select the correct shard.
+4. Open or reuse the shard connection.
+5. Execute the operation.
+6. Return the result.
+
+## Requirements
+
+- The shard key must be available or derivable.
+- Reads and writes must use the same mapping.
+- Topology changes must update routing safely.
+- Incorrect routing must not create duplicates.
+- Incorrect routing must not cause missing data.
+
+> Shard routing becomes part of application correctness.
+
+---
+
+# 25. Shard-Key Selection
+
+A good shard key should:
+
+- Distribute rows evenly
+- Distribute traffic evenly
+- Support common query patterns
+- Remain stable over time
+- Avoid concentrating new writes
+- Reduce cross-shard operations
+- Be available during routing
+- Keep related records together when useful
+
+## Questions to Ask
+
+- Is the key sequential?
+- Can one customer or community become extremely large?
+- Do the most common queries include the key?
+- Will the key ever change?
+- Can related data remain on one shard?
+- Does the key align with regional rules?
+
+> A balanced row count does not guarantee balanced traffic.
+
+---
+
+# 26. Hot Shards
+
+A hot shard receives much more traffic or data than other shards.
+
+## Causes
+
+- Celebrity accounts
+- Popular tenants
+- Very large communities
+- Current timestamp ranges
+- Large cities
+- Uneven customer sizes
+- Skewed access patterns
+
+## Why It Matters
+
+The cluster may have significant unused capacity while one shard remains overloaded.
+
+Adding servers does not help unless the hot shard can be moved or divided.
+
+## Monitor Per Shard
+
+- Request rate
+- Write rate
+- CPU
+- Memory
+- Disk
+- Latency
+- Data size
+
+---
+
+# 27. Cross-Shard Operations
+
+A cross-shard query must:
+
+1. Contact multiple shards.
+2. Collect partial results.
+3. Merge, sort, or aggregate them.
+4. Return one logical response.
+
+## Difficult Operations
+
+- Global analytics
+- Cross-shard joins
+- Global uniqueness
+- Foreign-key enforcement
+- Distributed transactions
+- Global ordering
+- Global aggregations
+
+Large analytics queries should normally use a separate data warehouse rather than query every production shard.
+
+> A sharded operational database should be optimized for shard-local requests.
+
+---
+
+# 28. When to Shard
+
+Consider sharding when:
+
+- Write throughput remains the bottleneck after read offloading.
+- One database cannot hold the required data.
+- CPU, memory, disk, or I/O remains near capacity.
+- Vertical scaling is no longer practical.
+- A single database cannot satisfy the resource requirements.
+
+Before sharding, verify:
+
+- Queries are optimized.
+- Indexes are appropriate.
+- Caching is effective.
+- Unnecessary reads are removed.
+- Read replicas have been considered.
+- Functional federation has been considered.
+- The write bottleneck is measured.
+
+> Sharding is usually a late-stage response because its complexity is long-term.
+
+---
+
+# 29. Range-Based Sharding
+
+Assign consecutive ranges to different shards.
+
+```text
+Users 1–1,000,000           → Shard A
+Users 1,000,001–2,000,000   → Shard B
+Users 2,000,001–3,000,000   → Shard C
+```
+
+## Strengths
+
+- Simple routing
+- Efficient range queries
+- Ordered data remains together
+- Large ranges can be split
+
+## Weaknesses
+
+- New writes may target the newest range.
+- Popular ranges can become hotspots.
+- Traffic may remain uneven even when row counts are balanced.
+
+## Best Fit
+
+- Ordered queries are important.
+- Range locality matters.
+- Hotspot controls are available.
+
+---
+
+# 30. Hash-Based Sharding
+
+Apply a hash function to a stable key.
+
+```text
+shard = hash(userId) % numberOfShards
+```
+
+## Strengths
+
+- Usually distributes records evenly
+- Reduces sequential-key hotspots
+- Supports efficient exact-key lookup
+
+## Weaknesses
+
+- Range queries may contact every shard.
+- Logically related rows may be separated.
+- Modulo hashing causes major movement when shard count changes.
+
+## Best Fit
+
+- Exact-key requests dominate.
+- Even load distribution is more important than ordered access.
+
+---
+
+# 31. Geographic Sharding
+
+Assign users or records to shards by region.
+
+```text
+India users  → India shard
+Europe users → Europe shard
+US users     → US shard
+```
+
+## Benefits
+
+- Lower regional latency
+- Regional isolation
+- Support for regional data rules
+- Support for regional licensing
+- Region-specific content
+
+## Risks
+
+- Regions grow at different rates.
+- Users may travel or move.
+- Shared global data complicates ownership.
+- Global queries require aggregation.
+
+> Geographic sharding is both a performance and governance decision.
+
+---
+
+# 32. Hybrid Sharding
+
+Different datasets can use different strategies.
+
+## Examples
+
+- Region first, then hash within each region
+- Tenant first, then channel
+- Time range for archival data and hash for active data
+- Federation first, then sharding inside a large domain
+
+> A clear architecture does not require every dataset to use the same partitioning strategy.
+
+---
+
+# 33. Re-Sharding
+
+Re-sharding changes data ownership when shards become too large, too busy, or too few.
+
+## Challenges
+
+- Moving large data volumes
+- Continuing reads and writes during migration
+- Updating routing rules
+- Temporary overlap between old and new locations
+- Preventing duplicates
+- Preventing missing data
+
+## Safe Migration Pattern
+
+1. Define the new owners.
+2. Copy existing data.
+3. Mirror or forward new writes.
+4. Verify synchronization.
+5. Move read traffic.
+6. Move write traffic.
+7. Remove old ownership after validation.
+
+> A sharding design is incomplete if it does not explain how ownership changes later.
+
+---
+
+# 34. Pre-Sharding
+
+Pre-sharding creates many logical shards before each requires a separate server.
+
+Initially:
+
+```text
+Server A → Logical shards 1, 2, 3, 4
+```
+
+Later:
+
+```text
+Server A → Logical shards 1, 2
+Server B → Logical shards 3, 4
+```
+
+## Benefits
+
+- Stable logical partition map
+- Easier future expansion
+- Gradual physical distribution
+- Less need to redefine the partitioning scheme
+
+## Costs
+
+- More logical partitions to manage
+- Requires separation between logical and physical ownership
+
+---
+
+# 35. Modulo Hashing Problem
+
+Traditional placement uses:
+
+```text
+server = hash(key) % numberOfServers
+```
+
+With four servers:
+
+```text
+hash(key) % 4
+```
+
+After adding a fifth server:
+
+```text
+hash(key) % 5
+```
+
+Most keys may now map to different servers.
+
+Changing from four to five servers can move roughly 80% of the keys.
+
+## Consequences
+
+- Large data migration
+- Heavy network usage
+- Heavy disk usage
+- Cache misses
+- Degraded performance
+- Complex coordination
+
+> A distribution algorithm may balance a stable cluster well while handling membership changes badly.
+
+---
+
+# 36. Consistent Hashing
+
+## Core Idea
+
+Consistent hashing arranges the hash space as a ring.
+
+1. Servers are placed on the ring.
+2. Each key is hashed to a point on the ring.
+3. The key belongs to the next server clockwise.
+
+## Adding a Server
+
+Only a neighboring range moves to the new server.
+
+## Removing a Server
+
+The removed server’s keys move to the next responsible server.
+
+## Benefit
+
+Most unrelated keys remain on their existing nodes.
+
+> Consistent hashing makes topology changes local rather than global.
+
+---
+
+# 37. Virtual Nodes
+
+## Problem
+
+With one ring position per physical server, random placement may create unequal ownership ranges.
+
+## Solution
+
+Assign each physical server many virtual positions.
+
+```text
+Physical Server A → A1, A2, A3, A4
+Physical Server B → B1, B2, B3, B4
+Physical Server C → C1, C2, C3, C4
+```
+
+## Benefits
+
+- Better statistical balance
+- Smaller migration units
+- Easier partial rebalancing
+- Less dependence on lucky placement
+
+> Virtual nodes convert a few large ranges into many smaller movable ownership units.
+
+---
+
+# 38. Weighted Virtual Nodes
+
+Not all servers have equal capacity.
+
+A stronger server can receive more virtual nodes.
+
+```text
+Server A capacity = 1x → 100 virtual nodes
+Server B capacity = 2x → 200 virtual nodes
+```
+
+## Benefits
+
+- Capacity-aware distribution
+- Support for mixed hardware
+- Gradual hardware upgrades
+
+## Caution
+
+The weights must reflect measured:
+
+- CPU capacity
+- Memory capacity
+- Disk capacity
+- Network capacity
+
+More ownership also means more:
+
+- Stored data
+- Replication work
+- Recovery responsibility
+
+---
+
+# 39. Hash Slots
+
+Some systems use a fixed number of hash slots instead of a continuous ring.
+
+```text
+Key → Hash Slot → Node
+```
+
+Redis Cluster uses:
+
+```text
+16,384 hash slots
+```
+
+Node changes move selected slots rather than redefining the entire hash function.
+
+## Benefits
+
+- Clear movement units
+- Explicit ownership mapping
+- Selected slots can move between nodes
+- No need to remap the complete hash space
+
+---
+
+# 40. Gradual Handoff
+
+## Adding a Node
+
+1. Add the node to the topology.
+2. Identify the ranges it will own.
+3. Copy those ranges from existing owners.
+4. Mirror or forward new writes.
+5. Let old owners temporarily serve reads.
+6. Verify that the new node caught up.
+7. Switch traffic.
+8. Remove old ownership.
+
+## Benefits
+
+- No full-dataset cutover
+- Temporary overlap protects availability
+- Migration can happen gradually
+- Lower operational risk
+
+> Consistent hashing limits how much data moves. Gradual handoff defines how it moves safely.
+
+---
+
+# 41. Hot Keys
+
+A balanced ring can still have a viral key that overloads its owner.
+
+## Example
+
+A celebrity post becomes viral.
+
+Millions of users request the same key, overloading the node that owns it.
+
+## Mitigation
+
+- Temporarily replicate the hot data
+- Distribute reads across multiple copies
+- Use a CDN
+- Use edge caching
+- Keep normal ownership unchanged
+- Remove temporary copies when demand falls
+
+> Partition balance handles many keys. Hot-key handling addresses disproportionate demand for a few keys.
+
+---
+
+# 42. Consistent Hashing Monitoring
+
+Monitor:
+
+- Request distribution variance
+- Data-size skew
+- CPU per node
+- Memory per node
+- Disk usage
+- Network usage
+- Virtual-node ownership
+- Migration progress
+- Node join and removal events
+- Hot-key concentration
+- Cluster membership agreement
+
+Topology changes should use quorum or majority agreement where appropriate.
+
+---
+
+# 43. Database Federation
+
+## Definition
+
+Federation splits databases according to business capability.
+
+Example:
+
+```text
+Accounts Database
+Catalog Database
+Orders Database
+Inventory Database
+Payments Database
+Recommendations Database
+Messaging Database
+```
+
+## Benefits
+
+- Independent domain scaling
+- Clear data ownership
+- Better fault isolation
+- Reduced resource competition
+- Different storage technologies can be used
+
+## Trade-Offs
+
+- Cross-database joins disappear.
+- Applications need aggregation services.
+- Reporting becomes more complicated.
+- More technologies increase operational effort.
+- Partial failures must be handled.
+
+> Federation asks which business capability owns the data.
+
+---
+
+# 44. Polyglot Persistence
+
+Polyglot persistence uses different database technologies for different workloads.
+
+| Workload | Possible Technology |
+|---|---|
+| Transactional accounts | PostgreSQL |
+| High-volume event writes | Cassandra |
+| Text search | Elasticsearch |
+| Caching | Redis |
+| Analytics | Data warehouse |
+
+## Benefit
+
+Each workload uses storage designed for its access pattern.
+
+## Risks
+
+Every additional technology requires expertise in:
+
+- Monitoring
+- Security
+- Backups
+- Restore procedures
+- Upgrades
+- Failure handling
+- Data movement
+
+> Use a different database only when the workload is meaningfully different.
+
+---
+
+# 45. Aggregation Services
+
+A database join cannot directly combine data stored in separate federated databases.
+
+An aggregation service:
+
+1. Identifies the required sources.
+2. Calls each database or owning service.
+3. Combines the responses.
+4. Returns one client-facing model.
+
+```text
+Trip History API
+    |
+    +--> User Service
+    +--> Trip Service
+    +--> Payment Service
+    +--> Rating Service
+```
+
+## Costs
+
+- More network calls
+- Partial failures
+- Inconsistent snapshots
+- Higher latency
+- More application code
+
+For frequent cross-domain reporting, create a read model or warehouse instead of repeatedly aggregating operational databases.
+
+---
+
+# 46. Denormalization
+
+## Definition
+
+Denormalization intentionally duplicates selected data to improve read performance.
+
+## Normalized Model
+
+```text
+Photo → User ID → User Table → Username and Profile Picture
+```
+
+## Denormalized Model
+
+```text
+Photo Record:
+- Photo ID
+- User ID
+- Username
+- Profile Picture URL
+```
+
+## Benefits
+
+- Fewer joins
+- Fewer network calls
+- Faster feeds and lists
+- Predictable read latency
+- Read-ready data
+
+## Costs
+
+- Additional storage
+- More complex writes
+- Stale duplicated values
+- Update fan-out
+- Reconciliation requirements
+- Repair requirements
+
+> Denormalization is a read optimization that creates an update-consistency obligation.
+
+---
+
+# 47. Good Denormalization Candidates
+
+A field is a strong candidate when:
+
+- It is read extremely frequently.
+- Its source value changes infrequently.
+- Joins or network calls dominate latency.
+- Slight propagation delay is acceptable.
+- Copies can be rebuilt or repaired.
+
+## Examples
+
+- Username in feed items
+- Seller name in product cards
+- Product title in order history
+- Profile picture in comments
+- Category name in search results
+
+---
+
+# 48. Materialized Views
+
+A materialized view stores a precomputed result.
+
+Instead of calculating this on every request:
+
+```text
+JOIN + COUNT + GROUP BY + SUM
+```
+
+the system:
+
+1. Computes the result periodically or incrementally.
+2. Stores the result.
+3. Serves the stored value quickly.
+
+## Benefits
+
+- Fast reads
+- Lower transactional database load
+- Stable performance for complex aggregations
+
+## Trade-Offs
+
+- Results may be stale.
+- Refresh jobs may fail.
+- Backfills may be needed.
+- Freshness must be monitored.
+
+> Materialized views trade live calculation for precomputation and controlled staleness.
+
+---
+
+# 49. Event-Sourced Read Views
+
+An event-oriented system stores immutable business events and builds several read models.
+
+```text
+Transaction Events
+    |
+    +--> Current Balance View
+    +--> Monthly Statement View
+    +--> Fraud Detection View
+    +--> Regulatory Reporting View
+```
+
+## Benefits
+
+- Read models can be optimized independently.
+- Views can be rebuilt from event history.
+- The same events support multiple consumers.
+
+## Trade-Offs
+
+- Greater architecture complexity
+- View-building delay
+- Replay requirements
+- Versioning requirements
+- More consistency management
+
+---
+
+# 50. Pattern Comparison
+
+| Pattern | Main Question | Main Purpose |
+|---|---|---|
+| Replication | Where should another copy exist? | Scale reads and availability |
+| Federation | Which business function owns this data? | Separate domains |
+| Sharding | Which partition owns this row? | Divide a large dataset |
+| Denormalization | Where should a read-ready copy exist? | Accelerate reads |
+
+---
+
+# 51. Combined Scaling Architecture
+
+Real systems normally combine multiple patterns.
+
+A possible sequence is:
+
+1. Federate by business capability.
+2. Choose a suitable database for each domain.
+3. Add replicas to read-heavy domains.
+4. Use read-your-writes for user updates.
+5. Cache frequently repeated reads.
+6. Denormalize hot read paths.
+7. Build materialized views for expensive aggregations.
+8. Shard only domains that exceed one database.
+9. Use consistent hashing or logical shard maps for rebalancing.
+10. Add active-active writes only when their value justifies conflict handling.
+
+> Scaling is compositional. Each domain should receive only the patterns required by its bottlenecks.
+
+---
+
+# 52. Practical Scenario Mapping
+
+## Read-Heavy News Website
+
+Use:
+
+- One master for publishing
+- Read replicas for article browsing
+- Read-your-writes for authors
+- Caching for popular articles
+
+## Global Profile System
+
+Use:
+
+- Regional read replicas
+- Master or caught-up replica for recent writers
+- Timestamp-based routing
+- Replication-lag monitoring
+
+## Collaborative Shopping Cart
+
+Use:
+
+- Active-active writes when required
+- Application-level merging
+- Add-wins behavior for independent cart additions
+
+Avoid discarding one cart update with last-writer-wins.
+
+## Airline Seat Booking
+
+Use:
+
+- Single ownership
+- Strong coordination
+- Atomic reservations
+- Strict inventory control
+
+Do not use last-writer-wins for the final seat.
+
+## Large Messaging Platform
+
+Use:
+
+- Sharding by stable conversation or user key
+- Composite partitioning for extremely large communities
+- Shard-local message retrieval
+- Separate analytics warehouse
+
+## Time-Series Events
+
+Use:
+
+- Range partitioning for date queries
+- Hash or hybrid partitioning for active ingestion
+- Explicit planning for current-range hotspots
+
+## Distributed Cache
+
+Use:
+
+- Consistent hashing
+- Many virtual nodes
+- Weighted ownership
+- Gradual handoff
+- Temporary replication of viral keys
+
+## Social Feed
+
+Use:
+
+- Denormalized usernames and profile images
+- Cached feed pages
+- Materialized counters
+- Propagation monitoring after profile updates
+
+## E-Commerce Platform
+
+Use:
+
+- Federation for accounts, catalog, orders, inventory, and payments
+- Replicas for catalog browsing
+- Denormalized product display models
+- Strong correctness for payments and inventory
+- Sharding only for domains that exceed a single database
+
+---
+
+# 53. Common Misunderstandings
+
+## “Read replicas scale everything.”
+
+False. They scale reads. Writes still pass through the master.
+
+## “Replicas are always current.”
+
+False. Asynchronous replication creates lag.
+
+## “Read-your-writes means everyone sees the latest value.”
+
+False. It guarantees immediate visibility to the writer.
+
+## “Monotonic reads always show the latest data.”
+
+False. They prevent moving backward but may still show stale state.
+
+## “Master-master automatically improves correctness.”
+
+False. It improves write locality and availability but introduces conflicts.
+
+## “The newest timestamp is always correct.”
+
+False. Last-writer-wins may destroy valid intent.
+
+## “A shard key only needs to balance row count.”
+
+False. It must also balance traffic and support common queries.
+
+## “Consistent hashing guarantees equal traffic.”
+
+False. Virtual nodes improve balance, but hot keys and unequal hardware still matter.
+
+## “Federation removes integration complexity.”
+
+False. It moves integration from SQL joins to services and pipelines.
+
+## “Denormalization is always bad design.”
+
+False. It is a deliberate read-performance trade-off.
+
+---
+
+# 54. Red Flags and Anti-Patterns
+
+Avoid:
+
+- Adding replicas without changing read routing
+- Sending every `SELECT` to a replica
+- Serving recent writers from lagging replicas
+- Using synchronous replication for every table
+- Choosing master-master only to avoid failover design
+- Using last-writer-wins for money or inventory
+- Allowing both sides of a partition to make conflicting ownership decisions
+- Sharding before indexing, caching, or query optimization
+- Using sequential shard keys for current-time writes without hotspot planning
+- Using hash sharding when important queries are ranges
+- Assuming equal row count means equal load
+- Running global analytics across production shards
+- Using modulo hashing in frequently changing clusters
+- Using too few virtual nodes
+- Assuming consistent hashing solves hot keys
+- Creating databases without meaningful domain boundaries
+- Using polyglot persistence without operational expertise
+- Denormalizing without propagation and repair
+- Building materialized views without freshness monitoring
+
+---
+
+# 55. Bottlenecks and Failure Points
+
+## Master-Slave
+
+- Master write bottleneck
+- Replication lag
+- Replica overload
+- Incorrect read routing
+- Master promotion failure
+
+## Master-Master
+
+- Conflict spikes
+- Slow conflict resolution
+- Clock-ordering issues
+- Split brain
+- Cross-region replication delay
+
+## Sharding
+
+- Hot shards
+- Cross-shard fan-out
+- Re-sharding failures
+- Shard-map errors
+- Schema drift
+- Uneven tenant sizes
+
+## Consistent Hashing
+
+- Too few virtual nodes
+- Hot keys
+- Unequal ownership
+- Incomplete handoff
+- Disputed membership
+
+## Federation
+
+- Aggregation fan-out
+- Partial failures
+- Cross-domain reporting
+- Technology sprawl
+
+## Denormalization
+
+- Stale copies
+- Failed propagation
+- Update fan-out
+- Materialized-view lag
+
+> Every scaling pattern moves pressure somewhere else.
+
+---
+
+# 56. Design-Review Questions
+
+## Bottleneck
+
+- What exact bottleneck are we solving?
+- What evidence proves one server is insufficient?
+- Is the problem reads, writes, storage, latency, or availability?
+- Can indexing, caching, query optimization, or vertical scaling solve it?
+
+## Replication
+
+- What is the read-to-write ratio?
+- Which reads can tolerate stale data?
+- How will writers see their own changes?
+- Can users move backward between replicas?
+- Which tables require synchronous replication?
+- What happens when the master fails?
+
+## Active-Active Writes
+
+- Why are multiple writable masters required?
+- What conflicts can occur?
+- What is the resolution rule for every conflict?
+- Can conflict prevention replace conflict resolution?
+- What happens during a network partition?
+
+## Sharding
+
+- What is the shard key?
+- Does it balance data and traffic?
+- Which queries are cross-shard?
+- How will uniqueness work?
+- How will transactions work?
+- How will shards be added?
+- How much data moves during rebalancing?
+- Would pre-sharding help?
+
+## Consistent Hashing
+
+- What key is hashed?
+- How many virtual nodes are required?
+- Should stronger servers own more ranges?
+- How will gradual handoff work?
+- What is the hot-key strategy?
+- How are topology changes protected?
+
+## Federation and Denormalization
+
+- What are the business boundaries?
+- Which cross-domain requests require aggregation?
+- Which fields are safe to duplicate?
+- How are copies updated and repaired?
+- What materialized-view staleness is acceptable?
+
+---
+
+# 57. Interview Questions
+
+## Conceptual Questions
+
+1. What problem does master-slave replication solve?
+2. Why does it scale reads but not writes?
+3. What is asynchronous replication?
+4. What is replication lag?
+5. What is read-your-writes consistency?
+6. What are monotonic reads?
+7. How do sticky sessions help?
+8. How does timestamp-based routing work?
+9. When should synchronous replication be used?
+10. What is master-master replication?
+11. Why are conflicts unavoidable with multiple writers?
+12. What is last-writer-wins?
+13. What is a vector clock?
+14. What is split brain?
+15. What is database sharding?
+16. What is the difference between vertical and horizontal partitioning?
+17. What is a shard key?
+18. What creates a hot shard?
+19. Why are cross-shard joins difficult?
+20. What is range-based sharding?
+21. What is hash-based sharding?
+22. What is geographic sharding?
+23. What is re-sharding?
+24. What is pre-sharding?
+25. Why does modulo hashing move many keys?
+26. How does consistent hashing work?
+27. What is a virtual node?
+28. Why use weighted virtual nodes?
+29. What are hash slots?
+30. Why does consistent hashing not solve hot keys?
+31. What is federation?
+32. What is polyglot persistence?
+33. What is denormalization?
+34. What is a materialized view?
+35. How can events support multiple read models?
+
+## Scenario Questions
+
+1. A user updates a profile and immediately sees the old value. What happened?
+2. A user sees a post, refreshes, and it disappears. Which guarantee is missing?
+3. One replica is ten seconds behind. How should routing react?
+4. When should an application consider multiple writable regions?
+5. Why is last-writer-wins unsafe for the final inventory item?
+6. What conflict policy fits independent shopping-cart additions?
+7. What should be evaluated when the master remains write-bound after adding replicas?
+8. What happens when one community becomes too large for a shard?
+9. Which strategy supports date-range queries, and what hotspot risk exists?
+10. Why is a date-range query expensive in a hash-sharded system?
+11. Which pattern reduces data movement when a node is added?
+12. How should stronger hardware receive more ownership?
+13. How can a viral key be handled?
+14. How can federated databases produce one response?
+15. What denormalization helps a social feed?
+16. What stored model improves repeated aggregations?
+
+---
+
+# 58. Glossary
+
+## Replication Terms
+
+- **Master database:** Database that accepts writes.
+- **Read replica:** Copy of the master that normally serves reads.
+- **Replication:** Copying changes between database nodes.
+- **Asynchronous replication:** Master confirms without waiting for replicas.
+- **Synchronous replication:** Write waits for replica acknowledgement.
+- **Replication lag:** Delay before a master write appears on a replica.
+- **Read-your-writes:** A user immediately sees their own update.
+- **Monotonic reads:** A user does not move from newer to older data.
+- **Sticky session:** Keeps a user on one replica for a period.
+- **Timestamp-based routing:** Uses replicas that have caught up to a known write position.
+
+## Active-Active Terms
+
+- **Active-active:** Multiple nodes accept traffic and writes.
+- **Master-master replication:** Multiple writable databases replicate to one another.
+- **Write conflict:** Incompatible updates occur on different writers.
+- **Last-writer-wins:** Keeps the update with the latest timestamp.
+- **Vector clock:** Metadata for reasoning about causal relationships.
+- **Split brain:** Multiple separated cluster parts act as authority.
+
+## Sharding Terms
+
+- **Shard:** One independent partition of a larger dataset.
+- **Sharding:** Splitting rows across multiple databases.
+- **Horizontal partitioning:** Splitting rows of the same logical table.
+- **Vertical partitioning:** Splitting tables or business functions.
+- **Shard key:** Field used to choose a shard.
+- **Hot shard:** Shard receiving disproportionate traffic.
+- **Cross-shard query:** Query that accesses multiple shards.
+- **Range sharding:** Assigns ordered ranges to shards.
+- **Hash sharding:** Uses a hash to distribute records.
+- **Geographic sharding:** Assigns records according to region.
+- **Re-sharding:** Redistributing ownership between shards.
+- **Pre-sharding:** Creating logical shards before needing more servers.
+
+## Consistent Hashing Terms
+
+- **Modulo hashing:** Uses `hash(key) % serverCount`.
+- **Consistent hashing:** Limits movement when nodes change.
+- **Hash ring:** Circular representation of the hash space.
+- **Virtual node:** Logical ring position assigned to a physical server.
+- **Weighted virtual node:** Capacity-based virtual-node allocation.
+- **Hash slot:** Fixed partition of the hash space.
+- **Gradual handoff:** Moves ownership in stages while nodes overlap.
+
+## Federation and Denormalization Terms
+
+- **Federation:** Splitting databases by business function.
+- **Polyglot persistence:** Using different databases for different workloads.
+- **Aggregation service:** Combines data from several services or databases.
+- **Denormalization:** Duplicating selected data to accelerate reads.
+- **Materialized view:** Stored precomputed query result.
+- **Event-sourced view:** Read model built from immutable events.
+
+---
+
+# 59. Quick Revision
+
+## Master-Slave Replication
+
+- One master accepts writes.
+- Replicas serve reads.
+- It is effective for read-heavy systems.
+- It does not increase master write capacity.
+- Asynchronous replication creates lag.
+
+## Replication-Lag Solutions
+
+- Read-your-writes
+- Monotonic reads
+- Sticky sessions
+- Timestamp-based routing
+- Selective synchronous replication
+- Short-lived caching
+- User-facing processing states
+- Geographic routing
+
+## Master-Master Replication
+
+- Multiple databases accept writes.
+- It improves global write latency and availability.
+- It introduces unavoidable conflict scenarios.
+- Conflict policies include last-writer-wins, merges, vector clocks, and ownership rules.
+- Split brain must be planned for.
+
+## Sharding
+
+- Divides a dataset across databases.
+- Scales writes and storage.
+- Shard-key choice determines balance and query efficiency.
+- Cross-shard operations are difficult.
+- Re-sharding must be planned before it is needed.
+
+## Sharding Strategies
+
+- Range sharding supports ordered queries but risks hotspots.
+- Hash sharding improves distribution but weakens range queries.
+- Geographic sharding improves locality and supports regional rules.
+- Hybrid strategies combine these benefits.
+
+## Consistent Hashing
+
+- Reduces key movement when nodes change.
+- Uses a hash ring or fixed slots.
+- Virtual nodes improve distribution.
+- Weighted ownership accounts for hardware differences.
+- Gradual handoff protects availability.
+- Hot keys require separate mitigation.
+
+## Federation
+
+- Splits databases by business capability.
+- Allows independent scaling.
+- Supports different technologies.
+- Replaces joins with services and pipelines.
+
+## Denormalization
+
+- Duplicates selected data.
+- Reduces joins and network calls.
+- Improves hot read paths.
+- Requires propagation, monitoring, reconciliation, and repair.
+
+---
+
+# 60. Top 15 Points to Remember
+
+1. Master-slave replication primarily scales reads.
+2. All writes still pass through the master.
+3. Asynchronous replication creates expected lag.
+4. Read-your-writes protects the writer’s experience.
+5. Monotonic reads prevent users from moving backward.
+6. Synchronous replication should be selective.
+7. Master-master introduces unavoidable conflict decisions.
+8. Last-writer-wins may silently discard valid intent.
+9. Sharding divides data and scales writes and storage.
+10. Shard keys must balance traffic, not only rows.
+11. Range sharding favors ordered access.
+12. Hash sharding favors even distribution.
+13. Consistent hashing limits movement during node changes.
+14. Virtual nodes improve balance, but hot keys need separate handling.
+15. Federation separates domains, while denormalization accelerates reads.
+
+---
+
+# 61. Final Mental Model
+
+When a database reaches its limits, ask:
+
+1. Is the bottleneck reads, writes, storage, latency, or availability?
+2. Can indexing, caching, query optimization, or vertical scaling solve it?
+3. Which users require immediate visibility?
+4. How much stale data is acceptable?
+5. Can concurrent writes be safely merged?
+6. Which key naturally locates the hottest data?
+7. Will that key distribute both rows and traffic?
+8. Which operations become cross-shard?
+9. How will ownership change later?
+10. Which data is safe to duplicate?
+11. How will duplicated data be repaired?
+12. What new failure mode does the selected pattern introduce?
+
+## Final Principle
+
+> Scale the proven bottleneck using the simplest suitable pattern, then explicitly design for the lag, conflict, routing, migration, monitoring, and consistency responsibilities created by that choice.
