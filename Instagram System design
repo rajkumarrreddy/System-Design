@@ -1,0 +1,2127 @@
+# Section 7: Design Instagram
+
+## 1. System Goal
+
+Design an Instagram-like system capable of supporting:
+
+- 2 billion monthly active users.
+- Around 500 million daily active users.
+- Around 100 million photo and video uploads per day.
+- Large uploads over unreliable mobile networks.
+- Asynchronous media processing.
+- Petabyte-scale media storage.
+- Global media delivery.
+- Personalized feeds.
+- Celebrity accounts with millions of followers.
+- Likes, comments, follows, stories, messages, and notifications.
+- Sudden traffic spikes during sports events, holidays, and breaking news.
+
+> This is a system-design case study. It does not claim to represent Instagram's actual private production architecture.
+
+---
+
+## 2. Functional Requirements
+
+### Media Features
+
+- Upload photos and videos.
+- Resume interrupted uploads.
+- Generate thumbnails.
+- Generate multiple media resolutions.
+- Compress and optimize media.
+- Extract selected metadata.
+- Perform content moderation.
+
+### Social Features
+
+- Follow and unfollow users.
+- View posts from followed accounts.
+- Like and comment on posts.
+- View user profiles.
+- View a user's recent posts.
+- Receive notifications.
+
+### Additional Features
+
+- Stories that disappear after 24 hours.
+- Direct messaging.
+- Lightweight real-time feed updates.
+
+Stories and direct messaging are mentioned requirements but are not fully designed in this case study.
+
+---
+
+## 3. Non-Functional Requirements
+
+- Global availability.
+- Feed response under one second.
+- Reliable uploads over unstable networks.
+- High write throughput.
+- Extremely high read throughput.
+- Petabyte-scale durable storage.
+- Cost-effective media storage.
+- Low-latency media delivery.
+- Cross-region disaster recovery.
+- Graceful degradation.
+- Privacy-aware metadata handling.
+- Secure media access.
+- Reliable distributed deletion.
+- Monitoring of queues, workers, caches, partitions, and regions.
+
+---
+
+## 4. Important Scale Estimates
+
+### Given Values
+
+- Monthly active users: 2 billion.
+- Daily active users: 500 million.
+- Uploads per day: 100 million.
+- Average photo size: 2 MB.
+- Average video size: 100 MB.
+- Read-to-write ratio: approximately 100:1.
+- Average accounts followed per user: 300.
+- Feed response target: less than one second.
+
+### Average Upload Rate
+
+100,000,000 uploads / 86,400 seconds
+
+Approximately 1,157 uploads per second.
+
+This is only the average. Peak traffic can be several times higher.
+
+### Average Media Read Rate
+
+100 million uploads × 100 reads = 10 billion media views per day.
+
+10,000,000,000 / 86,400
+
+Approximately 115,741 media views per second.
+
+### Raw Storage Boundaries
+
+If every upload were a 2 MB photo:
+
+100 million × 2 MB = 200 TB per day.
+
+If every upload were a 100 MB video:
+
+100 million × 100 MB = 10 PB per day.
+
+The actual value depends on:
+
+- Photo-to-video ratio.
+- Compression ratio.
+- Number of generated variants.
+- Replication factor.
+- Retention period.
+- Derivative size multiplier.
+
+### Social Graph Scale
+
+2 billion users × 300 follows = 600 billion directed follow relationships.
+
+### Feed Entry Scale
+
+500 million users × 100 stored feed entries = 50 billion feed entries.
+
+---
+
+## 5. High-Level Architecture
+
+Client  
+↓  
+API Gateway and Authentication  
+↓  
+Upload Service / Application Services  
+↓  
+Temporary Storage / Metadata Database  
+↓  
+Processing Queue  
+↓  
+Media Processing Workers  
+↓  
+Permanent Object Storage  
+↓  
+CDN  
+↓  
+Viewer
+
+The system separates the following workloads:
+
+- Media upload.
+- Media processing.
+- Binary media storage.
+- Structured metadata storage.
+- Feed generation.
+- Ranking.
+- Global media delivery.
+- Likes, comments, and metric aggregation.
+
+Each workload can scale and fail independently.
+
+---
+
+# PART 1: MEDIA UPLOAD
+
+## 6. Upload Problem
+
+A photo may be around 2 MB, while a video may be around 100 MB.
+
+Mobile connections can:
+
+- Disconnect.
+- Switch between Wi-Fi and cellular data.
+- Become slow suddenly.
+- Lose the server acknowledgement.
+- Fail near the end of the upload.
+
+Uploading a large file through one request is risky.
+
+If a 100 MB upload fails at 99%, the user may have to upload the complete file again.
+
+The solution is a resumable chunked-upload protocol.
+
+---
+
+## 7. Chunked and Resumable Upload
+
+The client divides the file into smaller numbered chunks.
+
+For example, a 100 MB video can be divided into 100 chunks of approximately 1 MB each.
+
+Each chunk can be:
+
+- Uploaded independently.
+- Validated independently.
+- Acknowledged independently.
+- Retried independently.
+- Uploaded sequentially or in parallel.
+
+### Upload Flow
+
+1. Client initiates an upload session.
+2. Server creates an upload-session ID.
+3. Server returns chunking instructions.
+4. Client divides the file into numbered chunks.
+5. Client uploads each chunk.
+6. Server stores and acknowledges every chunk.
+7. Client retries failed or uncertain chunks.
+8. Client requests upload completion.
+9. Server verifies that all chunks exist.
+10. Server validates final size and integrity.
+11. Server assembles or composes the final object.
+12. Original media enters temporary storage.
+13. A processing job is added to a durable queue.
+
+---
+
+## 8. Upload API Design
+
+### Initiate Upload
+
+Endpoint:
+
+POST /uploads
+
+Example request:
+
+{
+  "fileName": "video.mp4",
+  "fileSize": 104857600,
+  "contentType": "video/mp4"
+}
+
+Example response:
+
+{
+  "uploadSessionId": "upload-123",
+  "chunkSize": 1048576,
+  "expiresAt": "session-expiration-time"
+}
+
+Responsibilities:
+
+- Authenticate the user.
+- Validate expected file size.
+- Validate supported media type.
+- Create the upload session.
+- Define chunk size.
+- Define expiration time.
+- Associate the session with its owner.
+
+### Upload Chunk
+
+Endpoint:
+
+PUT /uploads/{uploadSessionId}/chunks/{chunkNumber}
+
+The request contains:
+
+- Upload-session ID.
+- Chunk number.
+- Chunk bytes.
+- Chunk checksum.
+- Authentication information.
+
+The server:
+
+- Verifies session ownership.
+- Validates the chunk.
+- Stores the chunk.
+- Records successful receipt.
+- Returns an acknowledgement.
+
+### Check Upload Status
+
+Endpoint:
+
+GET /uploads/{uploadSessionId}
+
+Example response:
+
+{
+  "receivedChunks": [1, 2, 3, 5],
+  "missingChunks": [4, 6],
+  "status": "UPLOADING"
+}
+
+### Complete Upload
+
+Endpoint:
+
+POST /uploads/{uploadSessionId}/complete
+
+The server:
+
+- Verifies all required chunks.
+- Checks final file size.
+- Checks final checksum.
+- Assembles or composes the object.
+- Creates the processing request.
+- Returns a stable media-processing state.
+
+---
+
+## 9. Idempotent Chunk Upload
+
+Suppose chunk 42 reaches the server successfully, but the client does not receive the acknowledgement.
+
+The client cannot know whether the request succeeded, so it sends chunk 42 again.
+
+The server must not append duplicate bytes.
+
+A chunk can be uniquely identified using:
+
+(uploadSessionId, chunkNumber)
+
+### Duplicate Handling
+
+- If the chunk is missing, store it.
+- If the same chunk already exists with the same checksum, return success.
+- If the chunk exists with a different checksum, reject the request.
+- Never append the same numbered chunk twice.
+
+Idempotency makes aggressive retries safe.
+
+Without idempotency, unreliable networks can cause data corruption.
+
+---
+
+## 10. Adaptive Upload Strategy
+
+### Strong Connection
+
+- Upload multiple chunks in parallel.
+- Use bounded concurrency.
+- Increase concurrency only when network conditions are stable.
+
+### Weak Connection
+
+- Upload chunks sequentially.
+- Reduce concurrency.
+- Retry failed chunks with exponential backoff.
+- Avoid restarting confirmed chunks.
+
+### Progress Calculation
+
+Upload progress should be based on chunks confirmed by the server.
+
+Confirmed progress = confirmed uploaded bytes / total file size.
+
+Do not calculate progress only from bytes sent by the client.
+
+---
+
+## 11. Upload User Experience
+
+- Upload in the background.
+- Let the user continue editing the caption.
+- Let the user continue browsing the application.
+- Show progress based on server-confirmed chunks.
+- Resume automatically when connectivity returns.
+- Provide retry controls for recoverable errors.
+- Allow multiple uploads to queue.
+- Show a processing state after upload completion.
+- Do not claim final publication until the original is durable and valid.
+
+### Upload States
+
+- UPLOADING
+- UPLOADED
+- QUEUED
+- PROCESSING
+- READY
+- FAILED
+- FLAGGED
+
+---
+
+## 12. Dedicated Upload Servers
+
+Large uploads consume:
+
+- Long-lived network connections.
+- Network bandwidth.
+- Memory buffers.
+- Temporary disk.
+- Connection-pool capacity.
+
+Uploads should use dedicated upload services instead of normal application servers.
+
+This prevents media uploads from affecting:
+
+- Feed browsing.
+- Likes.
+- Comments.
+- Authentication.
+- Profile requests.
+- Follow and unfollow operations.
+
+---
+
+## 13. Temporary Storage
+
+Incomplete chunks and newly assembled files go to temporary storage.
+
+A possible temporary retention period is 24 to 48 hours.
+
+Temporary storage contains:
+
+- Incomplete chunks.
+- Abandoned uploads.
+- Newly completed originals.
+- Media waiting for processing.
+
+Only validated media should move to permanent storage.
+
+Expired sessions and abandoned chunks must be cleaned automatically.
+
+---
+
+## 14. Upload Security
+
+- Authenticate every upload session.
+- Associate each session with its owner.
+- Validate actual file content, not only the extension.
+- Scan files for malware.
+- Prevent uploaded content from executing as server code.
+- Enforce maximum file size.
+- Enforce maximum chunk count.
+- Apply rate limits.
+- Validate final file integrity.
+- Expire abandoned sessions.
+- Encrypt data in transit.
+- Encrypt stored media.
+- Reject unsupported media types.
+
+---
+
+# PART 2: MEDIA PROCESSING
+
+## 15. Asynchronous Processing
+
+Media processing should not happen inside the upload request.
+
+Processing flow:
+
+Completed upload  
+↓  
+Temporary storage  
+↓  
+Durable queue  
+↓  
+Processing workers  
+↓  
+Resize and optimize  
+↓  
+Metadata and moderation  
+↓  
+Permanent object storage
+
+### Why Asynchronous Processing?
+
+- The upload response remains fast.
+- Users do not wait for every resolution.
+- Processing spikes create queue backlog instead of API failure.
+- Worker pools can scale independently.
+- Failed jobs can be retried.
+- Different workers can specialize in different tasks.
+
+---
+
+## 16. Processing Tasks
+
+Workers may perform:
+
+- Image resizing.
+- Thumbnail creation.
+- Video transcoding.
+- Format conversion.
+- Compression.
+- Metadata extraction.
+- Sensitive metadata removal.
+- Malware scanning.
+- Content moderation.
+- Copyright detection.
+- Spam detection.
+- Final object promotion.
+
+---
+
+## 17. Processing Retry Requirements
+
+Processing workers must be idempotent.
+
+When a job is retried:
+
+- Do not publish the same post twice.
+- Do not create duplicate metadata.
+- Use deterministic media-variant identifiers.
+- Preserve the durable original.
+- Recreate only missing or invalid derivatives.
+- Move repeatedly failing jobs to a dead-letter queue.
+
+---
+
+## 18. Media Variants
+
+Possible variants include:
+
+- Small thumbnail.
+- Feed-sized image.
+- Medium-resolution image.
+- High-resolution image.
+- Desktop image.
+- WebP version.
+- Video thumbnail.
+- Different video resolutions.
+
+Example object names:
+
+media/{mediaId}/original
+
+media/{mediaId}/thumbnail-200x200.webp
+
+media/{mediaId}/feed-1080.webp
+
+media/{mediaId}/large-2048.webp
+
+### Deterministic Variant Names
+
+Deterministic names provide:
+
+- Safe retries.
+- No duplicate logical variants.
+- Predictable CDN cache keys.
+- Easier reprocessing.
+- Easier deletion.
+
+Only approved sizes and formats should be supported.
+
+Do not allow uncontrolled transformation parameters that can generate unlimited variants.
+
+---
+
+## 19. Metadata and Privacy
+
+Media may contain:
+
+- Capture timestamp.
+- Camera information.
+- Device information.
+- GPS coordinates.
+- Orientation.
+- Dimensions.
+
+Sensitive metadata such as GPS coordinates should be removed unless the user intentionally shares location.
+
+Extracting metadata does not mean exposing it publicly.
+
+---
+
+## 20. Content Moderation
+
+Automated moderation may detect:
+
+- Inappropriate content.
+- Spam.
+- Copyright violations.
+- Malware.
+- Policy violations.
+
+Flagged media can enter manual review.
+
+Possible moderation states:
+
+- PENDING
+- APPROVED
+- REJECTED
+- FLAGGED
+- UNDER_REVIEW
+
+Moderated or unavailable media must not appear through:
+
+- Feeds.
+- Search.
+- Direct CDN URLs.
+- Profile pages.
+- Recommendation systems.
+
+---
+
+# PART 3: MEDIA STORAGE AND DELIVERY
+
+## 21. Object Storage
+
+Photos and videos are large, mostly immutable binary objects.
+
+Object storage is more suitable than storing media bytes in relational or Cassandra rows.
+
+### Object Storage Contains
+
+- Original photos.
+- Original videos.
+- Thumbnails.
+- Compressed images.
+- Different image resolutions.
+- Video derivatives.
+
+### Database Contains
+
+- Media ID.
+- Post ID.
+- Owner ID.
+- Object keys.
+- Dimensions.
+- Media format.
+- Processing state.
+- Moderation state.
+- Creation timestamp.
+- Selected metadata.
+
+---
+
+## 22. Media and Metadata Separation
+
+### Media Path
+
+Processing worker  
+→ Object storage  
+→ CDN  
+→ Viewer
+
+### Metadata Path
+
+Client  
+→ Application API  
+→ Database or cache  
+→ Feed response
+
+A feed response needs:
+
+- Post ID.
+- Author information.
+- Caption.
+- Ranking information.
+- Media metadata.
+- CDN URL.
+
+It does not need to transfer image bytes through the application server.
+
+---
+
+## 23. Storage Tiering
+
+Most media receives the majority of its views shortly after publication.
+
+### Storage Lifecycle
+
+Temporary storage  
+→ Hot storage  
+→ Cool or cold storage  
+→ Archive storage
+
+### Hot Storage
+
+Suitable for:
+
+- Recent posts.
+- Popular media.
+- Viral media.
+- Frequently accessed objects.
+- Latency-sensitive content.
+
+### Cold Storage
+
+Suitable for:
+
+- Older media.
+- Rarely accessed content.
+- Content where slower first retrieval is acceptable.
+
+### Trade-Offs
+
+Cold storage reduces storage cost but may increase:
+
+- First-read latency.
+- Retrieval charges.
+- Restoration time.
+- Operational complexity.
+
+---
+
+## 24. Rewarming Old Content
+
+If an old post becomes popular again:
+
+1. The first request may retrieve it from cold storage.
+2. The CDN caches the media.
+3. Repeated requests hit CDN edge locations.
+4. The system may move the object back to hot storage.
+5. The stable media identifier should remain unchanged.
+
+---
+
+## 25. Geographic Replication
+
+A global system should not depend on one region.
+
+### Goals
+
+- Accept uploads near the creator.
+- Reduce upload latency.
+- Survive an entire regional failure.
+- Provide regional origins for CDN misses.
+- Route traffic to healthy regions.
+
+Replication can happen asynchronously after the original is durable.
+
+The system should track whether required regional replicas have completed.
+
+---
+
+## 26. CDN
+
+A Content Delivery Network stores popular media near viewers.
+
+### CDN Benefits
+
+- Lower latency.
+- Reduced origin bandwidth.
+- Protection against viral read traffic.
+- Faster global delivery.
+- Reduced cross-region requests.
+
+### CDN Flow
+
+Viewer requests media  
+↓  
+Nearby CDN edge  
+↓  
+If cache hit: return media  
+↓  
+If cache miss: retrieve from regional origin  
+↓  
+Store at edge  
+↓  
+Return media
+
+The CDN is not the permanent source of truth.
+
+Object storage remains the durable origin.
+
+---
+
+## 27. Media URLs and Cache Keys
+
+Media URLs should be:
+
+- Stable.
+- Cacheable.
+- Variant-specific.
+- Easy to invalidate.
+- Safe from unlimited transformations.
+
+Example:
+
+https://cdn.example.com/media/{mediaId}/feed-1080.webp
+
+Different sizes and formats must produce different cache keys.
+
+Deleted or moderated media requires CDN purge or expiration.
+
+---
+
+## 28. Adaptive Media Quality
+
+Serve media based on:
+
+- Device resolution.
+- Network quality.
+- Viewport size.
+- Supported formats.
+- User settings.
+
+Examples:
+
+- Slow mobile network → small compressed image.
+- Strong network → larger image.
+- Small feed card → feed-sized image.
+- Supported client → efficient format such as WebP.
+
+Do not serve desktop-resolution media inside a small mobile feed card.
+
+---
+
+## 29. Bandwidth Optimization
+
+At Instagram scale, bandwidth can cost more than storage.
+
+Important optimizations:
+
+- High CDN cache-hit ratio.
+- Correct media variant.
+- Efficient compression.
+- Modern image formats.
+- Client-side caching.
+- Limited intelligent preloading.
+- Avoiding duplicate downloads.
+- Stable immutable URLs.
+
+The cheapest media request is often one served from a nearby cache using fewer bytes.
+
+---
+
+## 30. Intelligent Preloading
+
+The client can prefetch likely next feed items.
+
+### Good Preloading
+
+- Fetch only a few likely next items.
+- Consider network quality.
+- Consider battery level.
+- Consider device resources.
+- Cancel irrelevant preloads.
+- Prioritize visible content.
+
+### Bad Preloading
+
+- Downloading many full-resolution images.
+- Consuming mobile data for unseen content.
+- Competing with active uploads.
+- Wasting battery and bandwidth.
+
+---
+
+## 31. Erasure Coding
+
+Erasure coding can be considered for old archival content.
+
+Instead of storing several complete replicas, the system stores encoded fragments.
+
+The original can be reconstructed when enough fragments remain.
+
+### Benefits
+
+- Lower storage overhead than full replication.
+- Tolerance of some fragment loss.
+
+### Costs
+
+- More complex reconstruction.
+- Slower retrieval.
+- Greater operational complexity.
+
+Erasure coding is better suited to old, rarely accessed media than latency-sensitive content.
+
+---
+
+## 32. Distributed Deletion
+
+Deleting only the database row is not enough.
+
+### Deletion Workflow
+
+1. Mark the post unavailable in metadata.
+2. Remove it from feeds.
+3. Remove it from search and recommendation candidates.
+4. Delete the original.
+5. Delete all derivatives.
+6. Remove regional replicas.
+7. Purge or expire CDN copies.
+8. Handle archive copies according to policy.
+9. Verify deletion completion.
+10. Retry failed deletion steps.
+
+Authorization, privacy, moderation, and deletion rules must never be bypassed.
+
+---
+
+# PART 4: FEED GENERATION
+
+## 33. Feed Problem
+
+When a viewer opens Instagram, the system must:
+
+1. Find relevant recent posts.
+2. Remove deleted, blocked, or moderated posts.
+3. Rank candidates.
+4. Paginate results.
+5. Respond in under one second.
+
+The main question is:
+
+Should feed computation happen when the author posts, when the viewer reads, or at both times?
+
+---
+
+## 34. Pull Model
+
+Pull is also called fan-out on read.
+
+### Flow
+
+Viewer requests feed  
+↓  
+Load following list  
+↓  
+Fetch recent posts from followed users  
+↓  
+Merge candidates  
+↓  
+Remove duplicates  
+↓  
+Filter unavailable content  
+↓  
+Rank or sort  
+↓  
+Return feed
+
+### Advantages
+
+- Fresh content at read time.
+- No precomputed feed for every user.
+- No huge fan-out write when a celebrity posts.
+- Suitable for smaller platforms.
+- Suitable for infrequent feed readers.
+
+### Disadvantages
+
+- Expensive feed reads.
+- May access many users and shards.
+- Higher request-time latency.
+- Major events can overload databases.
+- Candidate merging can be expensive.
+
+---
+
+## 35. Push Model
+
+Push is also called fan-out on write.
+
+### Flow
+
+Author creates post  
+↓  
+Persist post  
+↓  
+Load followers  
+↓  
+Create fan-out jobs  
+↓  
+Insert post ID into follower feeds  
+↓  
+Followers read precomputed feeds
+
+### Advantages
+
+- Very fast feed reads.
+- Less request-time computation.
+- Good for read-heavy systems.
+- Good for authors with modest follower counts.
+
+### Disadvantages
+
+- High write volume.
+- Storage required for personalized feeds.
+- Work is performed for inactive users.
+- Celebrities create extreme fan-out.
+- Asynchronous fan-out can reduce freshness.
+
+---
+
+## 36. Celebrity Fan-Out Problem
+
+A regular user with 300 followers may create approximately 300 feed writes.
+
+A celebrity with 50 million followers may create 50 million feed writes from one post.
+
+The post identifier is small, but the number of destinations creates the problem.
+
+### Possible Failures
+
+- Queue backlog.
+- Feed-store write spikes.
+- Expensive follower enumeration.
+- Ordinary posts waiting behind celebrity jobs.
+- Different followers seeing the post at different times.
+
+---
+
+## 37. Hybrid Feed Model
+
+The hybrid model uses different strategies for different authors.
+
+### Regular Users
+
+Use push:
+
+Regular post  
+→ Fan-out jobs  
+→ Follower precomputed feeds
+
+### Celebrities
+
+Use pull:
+
+Celebrity post  
+→ Durable post store  
+→ Celebrity recent-post cache
+
+### Feed Read
+
+Precomputed regular feed  
++ Recent celebrity posts  
+→ Merge  
+→ Remove duplicates  
+→ Apply privacy and moderation filters  
+→ Rank  
+→ Paginate  
+→ Return feed
+
+The system performs write-time work for manageable audiences and read-time work for exceptional accounts.
+
+---
+
+## 38. Celebrity Classification
+
+A fixed threshold such as one million followers is only an example.
+
+The real classification should consider:
+
+- Follower count.
+- Posting frequency.
+- Percentage of active followers.
+- Fan-out completion time.
+- Feed-store write capacity.
+- Read-time merge cost.
+- Celebrity-cache hit ratio.
+
+Classification can be dynamic.
+
+An account may move between push and pull strategies.
+
+---
+
+## 39. Merge on Read
+
+The feed service combines:
+
+1. The viewer's precomputed regular-user feed.
+2. Recent posts from followed celebrity accounts.
+
+### Merge Responsibilities
+
+- Remove duplicate post IDs.
+- Remove deleted posts.
+- Remove blocked posts.
+- Remove moderated content.
+- Apply freshness limits.
+- Attach ranking features.
+- Score or sort posts.
+- Return a continuation cursor.
+
+Merge inputs must remain small and bounded.
+
+Do not scan unlimited celebrity-post history.
+
+---
+
+## 40. Feed Ranking
+
+Possible ranking signals:
+
+- Relationship strength.
+- Post recency.
+- Previous interaction with the author.
+- Preferred content type.
+- General post engagement.
+- Session behavior.
+- Product rules.
+- Safety constraints.
+- Availability constraints.
+
+### Ranking Flow
+
+Candidate collection  
+→ Feature retrieval  
+→ Candidate scoring  
+→ Safety and product rules  
+→ Sort candidates  
+→ Select page
+
+Ranking is optional intelligence.
+
+A ranking failure must not make the entire feed unavailable.
+
+---
+
+## 41. Feed Cache Layers
+
+Possible caches:
+
+- Per-user precomputed feed cache.
+- Celebrity recent-post cache.
+- Post-metadata cache.
+- Ranking-feature cache.
+- First-page response cache.
+- CDN cache for media.
+
+### Selective Invalidation
+
+When new content arrives:
+
+- Update only affected feed segments.
+- Avoid rebuilding the entire feed.
+- Remove deleted or moderated post IDs.
+- Invalidate only relevant response caches.
+
+---
+
+## 42. Feed Pagination
+
+Cursor-based pagination is better than large numeric offsets for frequently changing feeds.
+
+A cursor may contain:
+
+- Last returned score.
+- Last returned timestamp.
+- Last post ID.
+- Feed-generation version.
+
+Cursor pagination provides:
+
+- Stable continuation.
+- Bounded reads.
+- Fewer duplicates.
+- No need to scan every previous item.
+
+---
+
+## 43. Lightweight Real-Time Updates
+
+The system can send a small notification:
+
+New posts are available.
+
+The client then refreshes the relevant feed section.
+
+The notification is only a hint.
+
+It is not the source of truth.
+
+If the notification is lost, the next normal feed request must still return the post.
+
+---
+
+## 44. Traffic Spike Handling
+
+Examples:
+
+- Global sports final.
+- Holiday.
+- Breaking news.
+- Celebrity announcement.
+
+### Before the Event
+
+- Pre-scale fan-out workers.
+- Pre-scale feed readers.
+- Pre-scale ranking services.
+- Reserve queue capacity.
+- Warm important caches.
+- Ensure CDN and storage headroom.
+
+### During the Event
+
+- Prioritize durable post creation.
+- Bound fan-out concurrency.
+- Apply backpressure.
+- Protect databases with rate limits.
+- Serve cached feed results.
+- Simplify ranking if necessary.
+
+---
+
+## 45. Graceful Degradation
+
+The feed should become less personalized or slightly stale before becoming unavailable.
+
+### Fallback Sequence
+
+1. Serve a slightly stale cached feed.
+2. Skip expensive ranking features.
+3. Use a simpler ranking model.
+4. Fall back to chronological ordering.
+5. Reduce page size.
+6. Reduce preload depth.
+7. Delay non-critical notifications.
+8. Delay non-critical metrics.
+
+### Never Sacrifice
+
+- Post durability.
+- Authorization.
+- Privacy.
+- Moderation visibility rules.
+- Deletion controls.
+- Basic feed availability.
+
+---
+
+## 46. Feed Monitoring
+
+Important metrics:
+
+- Fan-out queue depth.
+- Fan-out completion latency.
+- Percentage of followers updated.
+- Feed-generation latency.
+- Cache hit ratio.
+- Celebrity merge latency.
+- Ranking-service latency.
+- Ranking fallback rate.
+- Stale-feed age.
+- Feed error rate.
+- Feed page size.
+- Cost per generated feed.
+
+---
+
+# PART 5: DATABASE DESIGN
+
+## 47. Database Strategy
+
+The case study uses Cassandra as a conceptual fit for high-scale structured social data.
+
+It does not mean every Instagram feature must use one Cassandra cluster.
+
+Different workloads may use:
+
+- Object storage for media.
+- Cassandra for predictable social queries.
+- Redis for caching.
+- Search engines for discovery.
+- Separate account stores for stronger transactions.
+- Durable queues for asynchronous work.
+
+---
+
+## 48. Why Cassandra Fits
+
+Cassandra is useful for:
+
+- Very high write throughput.
+- Append-oriented data.
+- Time-series access patterns.
+- Horizontal scaling.
+- Multi-region replication.
+- Tunable consistency.
+- Ordered data using clustering columns.
+- Query-specific denormalized tables.
+
+Cassandra may not be suitable when the application requires:
+
+- Complex joins.
+- Ad-hoc queries.
+- Multi-record transactions.
+- Simple operations at smaller scale.
+- Strict avoidance of duplicate data.
+- Easy operations for an inexperienced team.
+
+---
+
+## 49. Query-First Modeling
+
+In Cassandra, tables are designed from the queries that must be served.
+
+### Important Queries
+
+- Get profile by user ID.
+- Get recent posts by user.
+- Get followers of a user.
+- Get accounts followed by a user.
+- Get a viewer's feed segment.
+- Get precomputed metrics.
+
+For every query, define:
+
+- Partition key.
+- Clustering columns.
+- Sort order.
+- Maximum partition size.
+- Replication policy.
+- Consistency level.
+- Retry behavior.
+- Repair behavior.
+
+---
+
+## 50. User Profile Table
+
+Example Cassandra table:
+
+CREATE TABLE user_profiles (
+    user_id UUID PRIMARY KEY,
+    username TEXT,
+    bio TEXT,
+    profile_picture_url TEXT,
+    follower_count BIGINT,
+    following_count BIGINT,
+    created_at TIMESTAMP
+);
+
+Primary query:
+
+Get one profile by user ID.
+
+---
+
+## 51. Posts by User and Time
+
+A user's complete post history may become too large for one partition.
+
+Use time bucketing.
+
+Example:
+
+CREATE TABLE posts_by_user (
+    user_id UUID,
+    year_month TEXT,
+    created_at TIMESTAMP,
+    post_id UUID,
+    caption TEXT,
+    media_id UUID,
+    status TEXT,
+    PRIMARY KEY ((user_id, year_month), created_at, post_id)
+) WITH CLUSTERING ORDER BY (created_at DESC);
+
+Primary query:
+
+Get recent posts for one user.
+
+Time bucketing keeps partitions bounded while preserving efficient recent-post reads.
+
+---
+
+## 52. Followers and Following Tables
+
+The same relationship is stored in two directions because two different queries must be fast.
+
+### Followers by User
+
+CREATE TABLE followers_by_user (
+    target_user_id UUID,
+    follower_id UUID,
+    followed_at TIMESTAMP,
+    PRIMARY KEY (target_user_id, follower_id)
+);
+
+Query answered:
+
+Who follows this user?
+
+This table is useful for push fan-out.
+
+### Following by User
+
+CREATE TABLE following_by_user (
+    source_user_id UUID,
+    followed_user_id UUID,
+    followed_at TIMESTAMP,
+    PRIMARY KEY (source_user_id, followed_user_id)
+);
+
+Query answered:
+
+Whom does this user follow?
+
+This table is useful for pull and hybrid feed generation.
+
+### Write Problem
+
+Follow and unfollow operations must update both tables.
+
+If one write succeeds and another fails:
+
+- Retry using an idempotency key.
+- Record an event for reconciliation.
+- Run repair jobs.
+- Handle temporary inconsistency safely.
+
+---
+
+## 53. Feed Table
+
+Example:
+
+CREATE TABLE feed_by_user (
+    viewer_id UUID,
+    time_bucket TEXT,
+    rank_time TIMESTAMP,
+    post_id UUID,
+    author_id UUID,
+    media_id UUID,
+    PRIMARY KEY ((viewer_id, time_bucket), rank_time, post_id)
+) WITH CLUSTERING ORDER BY (rank_time DESC);
+
+A feed entry may contain:
+
+- Post ID.
+- Author ID.
+- Ordering information.
+- Small duplicated display fields.
+- Media references.
+
+Denormalization avoids expensive joins during feed reads.
+
+The trade-off is that duplicated information may become temporarily stale.
+
+---
+
+## 54. Partition Key Strategy
+
+A good partition key should:
+
+- Distribute load evenly.
+- Keep related query data together.
+- Prevent unbounded growth.
+- Avoid hot nodes.
+- Support ordered reads.
+- Remain stable as the system scales.
+
+Monitor:
+
+- Partition size.
+- Rows per partition.
+- Read latency by key.
+- Write latency by key.
+- Data distribution.
+- Hot partition concentration.
+
+A celebrity's follower partition may become extremely large.
+
+Additional bucketing may be required.
+
+---
+
+## 55. Replication and Consistency
+
+### Post Creation
+
+Quorum consistency may be used before acknowledging durable post creation.
+
+### Feed Reading
+
+Eventual consistency is usually acceptable because:
+
+- A short feed delay is tolerable.
+- Availability and speed are important.
+- A slightly stale feed is better than no feed.
+
+### Stronger Consistency
+
+Stronger consistency may be required for:
+
+- Authentication.
+- Account ownership.
+- Privacy changes.
+- Blocking.
+- Security settings.
+- Deletion visibility.
+- Access-control changes.
+
+Consistency should be selected per operation, not once for the complete platform.
+
+---
+
+## 56. Likes, Comments and Metrics
+
+Likes, comments, and views should not be globally counted on every read.
+
+### Event-Based Pattern
+
+Interaction  
+→ Durable event  
+→ Queue or stream  
+→ Aggregation worker  
+→ Precomputed counter
+
+The system can serve slightly delayed counts quickly.
+
+Periodic reconciliation can improve accuracy.
+
+---
+
+## 57. Cassandra Monitoring
+
+Monitor:
+
+- Partition sizes.
+- Hot partitions.
+- Read latency.
+- Write latency.
+- Replication health.
+- Compaction backlog.
+- Disk usage.
+- Memory usage.
+- Network saturation.
+- Data distribution.
+- Failed queries.
+- Slow queries.
+
+### Disaster Recovery
+
+- Use snapshots.
+- Maintain cross-region replicas.
+- Test node failure.
+- Test availability-zone failure.
+- Test complete regional failure.
+- Verify metadata and object-storage alignment.
+
+A scalable database is only useful if the team can operate and recover it safely.
+
+---
+
+# PART 6: COMPLETE SYSTEM FLOW
+
+## 58. Complete Post Lifecycle
+
+1. Client creates an upload session.
+2. Client divides the file into numbered chunks.
+3. Client uploads chunks.
+4. Failed or uncertain chunks are retried.
+5. Server verifies all chunks.
+6. Server validates final file integrity.
+7. Original enters temporary storage.
+8. A durable processing job is queued.
+9. Workers generate variants and thumbnails.
+10. Workers extract selected metadata.
+11. Workers remove sensitive metadata.
+12. Workers run malware checks and moderation.
+13. Valid media moves to permanent object storage.
+14. Media replicates across required regions.
+15. Metadata is written to query-specific tables.
+16. Regular authors trigger push fan-out.
+17. Celebrity authors update a recent-post cache.
+18. Feed reader combines regular and celebrity posts.
+19. Candidates are filtered.
+20. Candidates are ranked and paginated.
+21. Client receives metadata and CDN URLs.
+22. CDN serves the correct media variant.
+23. Likes, comments, and metrics use asynchronous paths.
+24. Deletion removes the post from feeds, caches, replicas, and storage.
+
+---
+
+## 59. Major Bottlenecks
+
+### Upload Bottlenecks
+
+- Too many long-lived connections.
+- Temporary-storage exhaustion.
+- Lost session state.
+- Missing chunk acknowledgements.
+- Upload queue backlog.
+
+### Processing Bottlenecks
+
+- Slow resizing workers.
+- Slow moderation models.
+- Poison jobs.
+- Duplicate processing.
+- Promotion before validation.
+
+### Storage Bottlenecks
+
+- Regional origin failure.
+- Low CDN hit ratio.
+- Unlimited variant generation.
+- Expensive cold-storage retrieval.
+- Incomplete deletion.
+
+### Feed Bottlenecks
+
+- Celebrity fan-out.
+- Cross-shard pull queries.
+- Ranking-service saturation.
+- Cache stampede.
+- Incorrect invalidation.
+- Large merge candidate sets.
+
+### Database Bottlenecks
+
+- Hot partitions.
+- Oversized partitions.
+- Compaction backlog.
+- Uneven data distribution.
+- Inconsistent denormalized writes.
+
+---
+
+## 60. Failure Scenarios
+
+### Connection Lost at 73%
+
+- Keep confirmed chunks.
+- Resume using the upload-session ID.
+- Request the missing-chunk list.
+- Do not restart the complete file.
+
+### Chunk Acknowledgement Lost
+
+- Retry using the same session ID and chunk number.
+- Server checks the existing checksum.
+- Return success if the identical chunk is already stored.
+
+### Worker Fails After Creating Thumbnail
+
+- Preserve the original.
+- Retry the job idempotently.
+- Reuse deterministic variant IDs.
+- Do not publish the post twice.
+
+### Celebrity with 80 Million Followers Posts
+
+- Persist the post first.
+- Add it to the celebrity recent-post cache.
+- Avoid fan-out to 80 million feeds.
+- Merge it during feed reading.
+- Pre-scale feed readers and caches.
+
+### Old Post Becomes Viral
+
+- Retrieve it from cold storage.
+- Cache it at the CDN.
+- Serve repeated requests from the edge.
+- Rewarm the object if necessary.
+- Keep the same stable media identifier.
+
+### Ranking Service Fails
+
+- Use cached ranking results if valid.
+- Use a simpler ranking method.
+- Fall back to chronological order.
+- Reduce page size.
+- Record ranking fallback metrics.
+
+### User Deletes a Post
+
+- Hide it immediately in metadata and feeds.
+- Delete originals and derivatives.
+- Purge CDN copies.
+- Remove regional and archive copies.
+- Verify completion.
+- Retry failed deletion steps.
+
+### Cassandra Region Fails
+
+- Route to healthy replicas.
+- Apply the configured consistency level.
+- Verify metadata and media alignment.
+- Follow the tested regional recovery plan.
+
+---
+
+## 61. Anti-Patterns
+
+Avoid:
+
+- Uploading a 100 MB video through one non-resumable request.
+- Processing every derivative before returning from upload.
+- Sending media through application servers on every read.
+- Storing media bytes in the primary metadata database.
+- Keeping all media forever in hot storage.
+- Serving full-resolution media to every device.
+- Assuming the CDN handles deletion automatically.
+- Using pure push for celebrities.
+- Using pure pull for every frequent feed reader.
+- Rebuilding the complete feed after every update.
+- Making ranking mandatory for feed availability.
+- Modeling Cassandra like a normalized relational database.
+- Using unbounded time-series partitions.
+- Ignoring partition-key skew.
+- Using eventual consistency for privacy-critical changes.
+- Deleting only the database record.
+
+---
+
+# PART 7: TRADE-OFFS
+
+## 62. Large Chunks vs Small Chunks
+
+### Large Chunks
+
+Advantages:
+
+- Fewer requests.
+- Lower request overhead.
+
+Disadvantages:
+
+- More data must be retried when a chunk fails.
+- Less precise progress tracking.
+
+### Small Chunks
+
+Advantages:
+
+- Easier retries.
+- Better progress tracking.
+
+Disadvantages:
+
+- More requests.
+- More metadata overhead.
+
+---
+
+## 63. Parallel vs Sequential Upload
+
+### Parallel Upload
+
+Advantages:
+
+- Faster on strong connections.
+- Better bandwidth utilization.
+
+Disadvantages:
+
+- Higher device resource usage.
+- Higher server load.
+- Can increase network congestion.
+
+### Sequential Upload
+
+Advantages:
+
+- Better for unstable networks.
+- Easier resource control.
+
+Disadvantages:
+
+- Slower on strong connections.
+
+---
+
+## 64. Synchronous vs Asynchronous Processing
+
+### Synchronous Processing
+
+Advantages:
+
+- Final result is ready before the response.
+
+Disadvantages:
+
+- High upload latency.
+- Poor behavior during traffic spikes.
+- Worker failure directly affects upload requests.
+
+### Asynchronous Processing
+
+Advantages:
+
+- Fast upload response.
+- Independent worker scaling.
+- Easy retry support.
+- Better spike handling.
+
+Disadvantages:
+
+- Requires processing states.
+- Requires queues and retry logic.
+- Media may not be immediately ready.
+
+---
+
+## 65. Hot vs Cold Storage
+
+### Hot Storage
+
+- Low latency.
+- Higher storage cost.
+- Suitable for recent and popular media.
+
+### Cold Storage
+
+- Lower cost.
+- Higher retrieval latency.
+- Possible retrieval charges.
+- Suitable for older media.
+
+---
+
+## 66. Pull vs Push Feed
+
+### Pull
+
+- Work happens at read time.
+- Provides fresher results.
+- Avoids massive fan-out writes.
+- Creates expensive reads.
+- Suitable for celebrity content.
+
+### Push
+
+- Work happens at write time.
+- Provides faster feed reads.
+- Requires more feed storage.
+- Creates large fan-out cost.
+- Suitable for regular users.
+
+### Hybrid
+
+- Push regular-user posts.
+- Pull celebrity posts.
+- Merge both at read time.
+- Balances read and write costs.
+
+---
+
+## 67. Strong vs Eventual Consistency
+
+### Stronger Consistency
+
+Use for:
+
+- Security.
+- Ownership.
+- Privacy.
+- Blocking.
+- Deletion visibility.
+- Account changes.
+
+### Eventual Consistency
+
+Use for:
+
+- Feed propagation.
+- Engagement counters.
+- Non-critical metrics.
+- Cache updates.
+
+---
+
+# PART 8: INTERVIEW PREPARATION
+
+## 68. Common Questions and Answers
+
+### Why use resumable uploads?
+
+A failed large upload should continue from confirmed chunks instead of restarting from zero.
+
+### How are duplicate chunks prevented?
+
+Use an idempotent key such as upload-session ID and chunk number, and validate the checksum.
+
+### Why use dedicated upload servers?
+
+Large streaming requests consume resources differently and should not affect normal API traffic.
+
+### Why use temporary storage?
+
+Incomplete or unvalidated content should not enter permanent storage.
+
+### Why process media asynchronously?
+
+Resizing, moderation, and format conversion are expensive and should not block the upload response.
+
+### Why use object storage?
+
+Object storage is designed for large immutable blobs and scales separately from structured metadata.
+
+### Why use a CDN?
+
+A CDN caches popular media near users, reduces latency, lowers origin bandwidth, and absorbs viral reads.
+
+### What is fan-out on read?
+
+Generate the personalized feed when the viewer requests it.
+
+### What is fan-out on write?
+
+Insert a new post into followers' precomputed feeds when the author publishes.
+
+### What is the celebrity problem?
+
+A single celebrity post may require tens of millions of feed writes.
+
+### How does the hybrid feed solve the celebrity problem?
+
+Push regular-user posts, pull celebrity posts, and merge both streams during feed reading.
+
+### Why should ranking be degradable?
+
+Ranking is optional intelligence. A ranking failure should fall back to cached or chronological feeds.
+
+### Why store followers and following separately?
+
+Each direction answers a different high-frequency query directly.
+
+### Why does Cassandra use denormalization?
+
+It avoids expensive joins and provides predictable query performance.
+
+### Why use time buckets?
+
+Time buckets prevent a user's complete history from creating one unbounded partition.
+
+### Can eventual consistency be used everywhere?
+
+No. It may be suitable for feeds but not for security, privacy, ownership, or deletion visibility.
+
+---
+
+## 69. Scenario Questions
+
+### Mobile Upload Repeatedly Fails
+
+Use:
+
+- Resumable chunks.
+- Persistent upload sessions.
+- Server acknowledgements.
+- Missing-chunk lookup.
+- Idempotent retry.
+
+### Processing Is Five Minutes Behind
+
+- Show a processing state.
+- Preserve the durable original.
+- Allow the queue to absorb the spike.
+- Scale workers.
+- Do not force re-upload.
+
+### CDN Serves a Deleted Photo
+
+Possible failure:
+
+- CDN purge did not complete.
+- Cache expiration is too long.
+- Deletion workflow missed a variant.
+- Authorization was not checked correctly.
+
+### Origin Bandwidth Cost Is Increasing
+
+Measure:
+
+- CDN cache-hit ratio.
+- Media size.
+- Variant selection.
+- Compression ratio.
+- Duplicate downloads.
+- Cache-control policy.
+- Origin miss rate.
+
+### One User's Post Partition Is Too Large
+
+- Add time buckets.
+- Split history across bounded partitions.
+- Keep recent posts easy to query.
+- Monitor partition size.
+
+### Follow Updated One Table but Not the Other
+
+- Retry the failed write.
+- Use idempotent operations.
+- Publish a reconciliation event.
+- Run background repair.
+
+### GPS Metadata Was Exposed
+
+Missing controls may include:
+
+- Metadata extraction policy.
+- GPS stripping.
+- User consent checks.
+- Privacy validation before publication.
+
+---
+
+# PART 9: CHECKLISTS
+
+## 70. Upload Checklist
+
+- [ ] Can uploads resume?
+- [ ] Are chunk retries idempotent?
+- [ ] Can missing chunks be identified?
+- [ ] Is final integrity verified?
+- [ ] Are abandoned sessions cleaned?
+- [ ] Are upload services isolated?
+- [ ] Is processing asynchronous?
+- [ ] Are file type and malware checked?
+- [ ] Is progress based on confirmed chunks?
+- [ ] Are temporary files automatically expired?
+
+---
+
+## 71. Storage Checklist
+
+- [ ] Are media bytes stored in object storage?
+- [ ] Are object keys deterministic?
+- [ ] Are generated variants bounded?
+- [ ] Are lifecycle rules defined?
+- [ ] Is cross-region replication tracked?
+- [ ] Are CDN purge rules defined?
+- [ ] Is deletion verified?
+- [ ] Are private objects protected?
+- [ ] Are old objects moved to cheaper tiers?
+
+---
+
+## 72. Feed Checklist
+
+- [ ] Is the system using pull, push, or hybrid?
+- [ ] Is the celebrity threshold measurable?
+- [ ] Is the precomputed feed bounded?
+- [ ] Are merge inputs bounded?
+- [ ] Can ranking fail safely?
+- [ ] Is cursor pagination used?
+- [ ] Are fan-out metrics monitored?
+- [ ] Are cache metrics monitored?
+- [ ] Can the feed serve stale results during failure?
+
+---
+
+## 73. Database Checklist
+
+- [ ] Is every table designed for a query?
+- [ ] Are partitions bounded?
+- [ ] Are hotspots monitored?
+- [ ] Are duplicate writes repairable?
+- [ ] Is consistency selected per operation?
+- [ ] Are snapshots created?
+- [ ] Is regional recovery tested?
+- [ ] Are compaction and replication monitored?
+- [ ] Are binary media objects kept outside Cassandra?
+
+---
+
+# PART 10: QUICK REVISION
+
+## 74. Top 15 Points to Remember
+
+1. Use resumable chunked uploads for large mobile files.
+2. Make chunk retries idempotent.
+3. Separate upload servers from application servers.
+4. Keep incomplete uploads in temporary storage.
+5. Process media asynchronously using queues and workers.
+6. Store binary media in object storage.
+7. Use hot and cold storage tiers.
+8. Use a CDN for global delivery.
+9. Serve the correct media size and format.
+10. Treat deletion as a distributed workflow.
+11. Pull performs feed computation at read time.
+12. Push performs feed computation at write time.
+13. Use a hybrid feed to handle celebrity fan-out.
+14. Design Cassandra tables from queries and bounded partitions.
+15. Select consistency and computation placement separately for every operation.
+
+---
+
+## 75. Final Summary
+
+Instagram is not one application server connected to one database.
+
+It is a collection of specialized distributed systems.
+
+### Upload
+
+- Resumable chunks.
+- Upload sessions.
+- Idempotent retries.
+- Final integrity validation.
+- Dedicated upload servers.
+- Temporary storage.
+
+### Processing
+
+- Durable queues.
+- Scalable workers.
+- Deterministic derivatives.
+- Metadata handling.
+- Content moderation.
+- Retry support.
+
+### Storage
+
+- Object storage.
+- Lifecycle tiers.
+- Cross-region replication.
+- CDN delivery.
+- Adaptive media variants.
+- Distributed deletion.
+
+### Feed
+
+- Push regular-user posts.
+- Pull celebrity posts.
+- Merge both sources.
+- Remove unavailable content.
+- Rank candidates.
+- Paginate using cursors.
+- Degrade gracefully.
+
+### Database
+
+- Query-first Cassandra modeling.
+- Denormalized tables.
+- Bounded partitions.
+- Time buckets.
+- Tunable consistency.
+- Monitoring and disaster recovery.
+
+The central architectural lesson is separation:
+
+- Separate media bytes from metadata.
+- Separate upload from processing.
+- Separate regular-user fan-out from celebrity delivery.
+- Separate durable candidate generation from optional ranking.
+- Separate CDN media delivery from application APIs.
+- Use stronger consistency where privacy and trust require it.
+- Use controlled eventual consistency where small delays are acceptable.
+- Ensure optional features can fail without destroying the core system.
